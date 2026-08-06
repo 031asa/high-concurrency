@@ -11,7 +11,7 @@ logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
     handlers=[
-        logging.FileHandler('trader.log'),
+        logging.FileHandler('./logs/trader.log'),
         logging.StreamHandler()
     ]
 )
@@ -138,7 +138,9 @@ class Trader:
 
     def cancel_order(self, local_id):
         logger.info(f"撤单 local_id={local_id}")
-        self.api.cancel_order(local_id)
+        order_sysid = self.orders.get(local_id).order_sysid
+        self.api.cancel_order(exchange="CFFEX", order_sysid=order_sysid)
+        # self.api.cancel_order(exchange="CFFEX", order_ref=local_id, order_group=-1)
 
     # ---------- 内部回调处理 ----------
     def _on_login(self, error, maxorderref, ismonitor):
@@ -154,8 +156,7 @@ class Trader:
         self.orders[o.order_localid] = o
         status_text = STATUS_MAP.get(o.status, f"未知({o.status})")
         direction = f"{'买' if o.action==0 else '卖'}{'开' if o.open_close==0 else '平'}"
-        msg = (f"委托 {o.order_localid} {o.instrument} {direction} "
-               f"价:{o.price} 量:{o.volume} 状态:{status_text}")
+        msg = (f"[_on_order] local_id:{o.order_localid} instrument:{o.instrument} direction:{direction} price:{o.price} volume:{o.volume} status:{status_text}")
         if o.order_sysid != -1:
             msg += f" sysid:{o.order_sysid}"
         if o.trade > 0:
@@ -167,9 +168,10 @@ class Trader:
         logger.info(msg)
 
         # 自动撤单测试（可按需取消注释）
-        # if o.status == 1 and o.price == 4670.0:
-        #     logger.info("触发自动撤单")
-        #     self.cancel_order(o.order_localid)
+        if o.status == 1 and o.price == 4400.0:
+            logger.info("触发自动撤单")
+            self.cancel_order(o.order_localid)
+            # self.cancel_order(o.order_sysid)
 
     def _on_trade(self, t):
         self.trades.append(t)
@@ -198,7 +200,7 @@ def main():
 
     instrument = "IF2609"
     print("测试：发送一个不会成交的限价单，观察回调")
-    trader.send_order(instrument, action=0, open_close=0, volume=1, price=5000.0, order_type=0)
+    trader.send_order(instrument, action=0, open_close=0, volume=1, price=4400.0, order_type=0)
 
     try:
         while True:
