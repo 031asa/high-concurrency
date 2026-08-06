@@ -1,0 +1,6 @@
+config/account.json
+config/ydClient.ini
+logs/
+__pycache__/
+*.pyc
+.venv/
