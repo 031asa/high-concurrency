@@ -1,0 +1,609 @@
+Help on module pyyd:
+
+NAME
+    pyyd - YDApi for Python
+
+CLASSES
+    builtins.object
+        YDApi
+    
+    class YDApi(builtins.object)
+     |  Python YDApi class. 
+     |  YDApi(listener, user, password, config='ydclient.ini')
+     |      listener methods(will be called if defined):
+     |          login(error_number:int, max_order_ref:int, is_admin:bool)
+     |              Called when login succeeded or failed.
+     |          caughtup()
+     |              Called when all init data and previous orders and trades are received.
+     |          trading_segment(exchange:str, time:str)
+     |          trading_segment_detail(segment_detail)
+     |              segment_detail:
+     |                  exchange
+     |                  product
+     |                  instrument
+     |                  trading_segment_time
+     |                  trading_status: 0-no trading, 1-continuous trading, 2-auction
+     |          comb_position(position_info)
+     |              position_info:
+     |                  account
+     |                  comb_position_def
+     |                  comb_detail_id
+     |                  position
+     |                  comb_hedge
+     |          order(order_info)
+     |              order_info:
+     |                  instrument
+     |                  action
+     |                  open_close
+     |                  hedge
+     |                  cstype
+     |                  price
+     |                  volume
+     |                  order_ref
+     |                  type
+     |                  flag
+     |                  conn
+     |                  real_conn
+     |                  errno
+     |                  exchange
+     |                  order_sysid
+     |                  status
+     |                  trade
+     |                  time
+     |                  order_localid
+     |                  account
+     |                  comb_position_def
+     |                  comb_hedge
+     |                  instrument2
+     |                  comb_detail_id
+     |                  order_group
+     |                  order_ref_control
+     |                  trigger_type
+     |                  trigger_price
+     |                  trigger_status
+     |                  max_order_ref
+     |                  cancel_time
+     |                  good_in_session
+     |          trade(trade_info)
+     |              trade_info:
+     |                  instrument
+     |                  volume
+     |                  action
+     |                  open_close
+     |                  hedge
+     |                  price
+     |                  order_ref
+     |                  real_conn
+     |                  order_sysid
+     |                  time
+     |                  order_localid
+     |                  order_group
+     |                  account
+     |                  trade_id
+     |                  commission
+     |          failed_cancel_order(failed_cancel_info)
+     |              failed_cancel_info:
+     |                  exchange
+     |                  order_ref
+     |                  flag
+     |                  errno
+     |                  order_sysid
+     |                  order_group
+     |                  account
+     |          quote(quote_info)
+     |              quote_info:
+     |                  account
+     |                  instrument
+     |                  bid_open_close
+     |                  bid_hedge
+     |                  ask_open_close
+     |                  ask_hedge
+     |                  bid_price
+     |                  ask_price
+     |                  bid_volume
+     |                  ask_volume
+     |                  order_ref
+     |                  cstype
+     |                  conn
+     |                  real_conn
+     |                  flag
+     |                  errno
+     |                  exchange
+     |                  quote_sysid
+     |                  bid_sysid
+     |                  ask_sysid
+     |                  rfq_id
+     |                  bid_finished
+     |                  ask_finished
+     |                  order_group
+     |                  order_ref_control
+     |                  max_order_ref
+     |                  good_in_session
+     |          failed_cancel_quote(failed_cancel_info)
+     |              failed_cancel_info:
+     |                  errno
+     |                  exchange
+     |                  quote_sysid
+     |                  account
+     |                  order_ref
+     |                  order_group
+     |                  instrument
+     |                  cancel_quote_sides
+     |          request_for_quote(rfq_info)
+     |              rfq_info:
+     |                  instrument
+     |                  time
+     |                  rfq_id
+     |          marketdata(marketdata_info)
+     |              marketdata_info:
+     |                  instrument
+     |                  tradingday
+     |                  pre_settle_price
+     |                  pre_close_price
+     |                  pre_open_interest
+     |                  upper_limit_price
+     |                  lower_limit_price
+     |                  last_price
+     |                  bid_price
+     |                  ask_price
+     |                  bid_volume
+     |                  ask_volume
+     |                  turnover
+     |                  open_interest
+     |                  volume
+     |                  timestamp
+     |                  avg_price
+     |          exchange_system_id(system_id_info)
+     |              system_id_info:
+     |                  exchange
+     |                  exchange_system_id_type
+     |                  yd_system_id
+     |                  exchange_system_id
+     |          spot_position(spot_position_info)
+     |              spot_position_info:
+     |                  instrument
+     |                  account
+     |                  position
+     |                  allocated_exec_volume
+     |                  allocated_exec_amount
+     |                  exchange_frozen_volume
+     |                  covered_volume
+     |                  execution_volume
+     |          exchange_conn_info(exchange_conn_info)
+     |              exchange_conn_info:
+     |                  exchange
+     |                  conn
+     |                  conn_status
+     |                  conn_info
+     |                  order_limit
+     |                  cancel_limit
+     |          response(errorno:int, request_type:int, request_id:int)
+     |  
+     |  Methods defined here:
+     |  
+     |  __init__(self, /, *args, **kwargs)
+     |      Initialize self.  See help(type(self)) for accurate signature.
+     |  
+     |  account_exchange_info(exchange_id, account_id='')
+     |      Get account exchange info.
+     |  
+     |  account_instrument_info(instrument_id, account_id='')
+     |      Get account exchange info.
+     |  
+     |  account_product_info(product_id, account_id='')
+     |      Get account exchange info.
+     |  
+     |  account_summary(account='')
+     |      Get account summary.
+     |  
+     |  accounts()
+     |      Return all accounts iterator.
+     |  
+     |  adjust_margin_model(account, margin_model, close_verity, margin_ratio, request_id=0)
+     |      Adjust margin model.
+     |      account (str): target account id
+     |      margin_model (int):margin model id
+     |      close_verify (int): close verify setting
+     |      margin_ratio (float): margin ratio
+     |      request_id (int): identify the request
+     |      Return True if request is sent successfully
+     |  
+     |  alter_money(account, alter_type, alter_value, request_id=0)
+     |      Modify balance and related parameters.
+     |      account (str): target account id
+     |      alter_type (int):0-usage, 1-deposit, 2-freeze for withdraw, 3 cancel freeze, 4-withdraw, 5-deposit to, 6-withdraw to, 7 force modify usage
+     |      alter_value (float): value
+     |      request_id (int): identify the request
+     |      Return True if request is sent successfully
+     |  
+     |  auto_create_dce_comb_position(comb_types=[])
+     |      Try to create a new DCE comb position.
+     |      comb_types: a list of comb position types to be processed. If empty all types are processed.
+     |      Return: a tuple of comb position def id and comb hedge id if an opportunity was found. Otherwise None
+     |  
+     |  cancel_multi_orders(orders, account='')
+     |      Cancel multiple orders. Arguments:
+     |      orders (object, dict, or namedtuple sequence): Each element may have following attributes(refer to cancel_order() for possible values of each attribute):
+     |          exchange(str): mandatory
+     |          order_sysid (str)
+     |          cstype (int)
+     |          conn (int)
+     |          flag (int)
+     |          order_ref (int)
+     |          order_group (int)
+     |      account (str): trading account(default '', i.e. current account)
+     |  
+     |  cancel_multi_quotes(quotes, account='')
+     |      Cancel multiple quotes. Arguments:
+     |      quotes (object, dict, or namedtuple sequence): Each element may have following attributes(refer to cancel_quote() for possible values of each attribute):
+     |          exchange(str): mandatory
+     |          quote_sysid (str)
+     |          cstype (int)
+     |          conn (int)
+     |          order_ref (int)
+     |          order_group (int)
+     |      account (str): trading account(default '', i.e. current account)
+     |  
+     |  cancel_order(exchange, order_sysid=-1, cstype=0, conn=0, flag=0, account='', order_ref=0, order_group=0)
+     |      Cancel an order. Keyword arguments:
+     |      exchange (str): exchange id
+     |      order_sysid (int): order id from exchange
+     |      flag (int):0-normal, 2-option execute, 3-abandon execute, 4-request for quote, 5-comb position, 6-exec together, 7-DCE mark, 8-option position offset, 9-SSE freeze option underlying, 10-Cover and position conversion.
+     |      other arguments: refer to insert_order() document
+     |      cancel by 'order_sysid' if 'order_group' is 0, otherwise by 'order_ref'
+     |  
+     |  cancel_quote(exchange='', quote_sysid=-1, cstype=0, conn=0, flag=0, account='', order_ref=0, order_group=0, instrument='', cancel_quote_sides=-3)
+     |      Cancel quote. Keyword arguments:
+     |      exchange (str): exchange id
+     |      quote_sysid (int): order id from exchange, negative value means cancel by order_ref
+     |      cancel_quote_sides(int): -1 cancel buy side, -2 cancel sell side, -3 cancel both sides (used only when cancelling by instrument)
+     |      other arguments: refer to insert_quote() document
+     |      cancel by instrument if 'instrument' is given
+     |      otherwise, cancel by 'quote_sysid' if 'order_group' is 0, and cancel by 'order_ref' if 'order_group'>0
+     |  
+     |  cash_commission_rate(instrument, action=0, account='')
+     |      Get cash commission rate for given instrument and buy/sell action.
+     |  
+     |  change_password(user, old_password, new_password, requestid=0)
+     |      change password.
+     |      user (str): user name
+     |      old_password (str): old password
+     |      new_password (str): new password
+     |      request_id (int): identify the request
+     |      Return True if request is sent successfully
+     |  
+     |  comb_position_def_available(comb_position_id, comb_hedge_flag=1, account='')
+     |      Wheter the comb position definition is available under current margin model setting
+     |  
+     |  comb_position_defs()
+     |      Return all comb position definitions iterator.
+     |  
+     |  commission_rate(instrument, hedge=1, account='')
+     |      Get commission rate for given instrument and hedge type.
+     |  
+     |  configs(name)
+     |      Get all configuration values.
+     |  
+     |  exchanges()
+     |      Return all exchanges iterator.
+     |  
+     |  export_data(directory)
+     |      Export API data, in CSV format
+     |  
+     |  find_comb_position_details(comb_position_def='', comb_hedge=1, account='', instrument='', long_short=0, include_split=False)
+     |      Find comb position details with given conditions.
+     |  
+     |  find_holdings(instrument='', product='', exchange='', account='')
+     |      Find holdingss with given conditions.
+     |  
+     |  find_orders(start_time='', end_time='', flag=0, comb_posi_def='', comb_hedge=1, instrument='', product='', exchange='', account='', pending=False)
+     |      Find orders with given conditions.
+     |  
+     |  find_positions(position_date=-1, long_short=-1, hedge=-1, instrument='', product='', exchange='', account='')
+     |      Find positions with given conditions.
+     |  
+     |  find_quotes(start_time='', end_time='', instrument='', product='', exchange='', account='', pending=False)
+     |      Find quotes with given conditions.
+     |  
+     |  find_spot_positions(instrument='', product='', exchange='', account='')
+     |      Find spot positions with given conditions.
+     |  
+     |  find_trades(start_time='', end_time='', instrument='', product='', exchange='', account='')
+     |      Find trades with given conditions.
+     |  
+     |  general_risk_params()
+     |      Return all general risk params iterator.
+     |  
+     |  get_account(account_id)
+     |      Get account info.
+     |  
+     |  get_client_packet_header(packet_type, version=0)
+     |      Get packet header for client requests.
+     |      packet_type: 0-insert order, 1-cancel order, 2-insert quote, 3-cancel quote.
+     |      version: 0-latest version, 1-old short version, 2-new long version(introduced since 1.280.0.0)
+     |      Return: a bytes object containing the packet header on success. Otherwise an empty bytes object
+     |  
+     |  get_comb_position_def(comb_position_id, comb_hedge_flag)
+     |      Get comb position definition info.
+     |  
+     |  get_comb_position_detail(comb_position_detail_id)
+     |      Get comb position detail info (for SSE and SZSE).
+     |  
+     |  get_comb_position_margin(comb_position_def, comb_hedge=1, account='')
+     |      Get comb position margin.
+     |  
+     |  get_exchange(exchange_id)
+     |      Get exchange info.
+     |  
+     |  get_id_from_exchange(exchange_id, id_type, id_in_system)
+     |      Get original ID from exchange based on ID in yd system.
+     |      id_type: refer to ydAPI document
+     |  
+     |  get_instrument(instrument_id)
+     |      Get instrument info.
+     |  
+     |  get_margin(instrument, hedge=1, long_short=3, price=0, account='')
+     |      Get margin for given instrument, hedge type, and position type. Arguments:
+     |      price: open price for margin calculation (if current margin calculation method need). Presettlement price is used if price==0.
+     |      Refer to insert_order() for meaning and value of other arguments
+     |  
+     |  get_margin_model(instrument='', product='', account='')
+     |      Get margin model id for given instrument or product
+     |  
+     |  get_marketdata(instrument_id)
+     |      Get instrument marketdata.
+     |  
+     |  get_order(order_ref=-1, account='', exchange='', order_sysid=-1, flag=0, order_group=0)
+     |      Get order info by order ref or sysid.
+     |  
+     |  get_product(product_id)
+     |      Get product info.
+     |  
+     |  get_quote(order_ref=-1, account='', exchange='', quote_sysid=-1, order_group=0)
+     |      Get quote info by ref or sysid.
+     |  
+     |  get_quote_derived_order(order_ref, direction, order_group=0, account='')
+     |      Get a quote derived order.
+     |  
+     |  get_request_for_quote(instrument)
+     |      Get request for quote info.
+     |  
+     |  get_system_param(name, target)
+     |      Get system parameter value.
+     |  
+     |  init_finished()
+     |      Return True if YDApi has finished init
+     |  
+     |  insert_multi_orders(orders, account='', checked=0)
+     |      Insert multiple orders. Arguments:
+     |      orders (object, dict, or namedtuple sequence): Each element may have following attributes (refer to insert_order() for value of each attribute):
+     |          instrument(str): mandatory
+     |          action (int)
+     |          open_close (int)
+     |          volume (int)
+     |          price (float)
+     |          type (int)
+     |          order_ref (int)
+     |          hedge (int)
+     |          cstype (int)
+     |          conn (int)
+     |          flag (int)
+     |          order_group (int)
+     |          order_ref_control (int)
+     |          trigger_type (int)
+     |          trigger_price (float)
+     |          good_in_session (bool)
+     |      account (str): trading account(default '', i.e. current account)
+     |  
+     |  insert_multi_quotes(quotes, account='')
+     |      Insert multiple quotes. Arguments:
+     |      quotes (object, dict, or namedtuple sequence): Each element may have following attributes (refer to insert_quote() for values of each attribute):
+     |          instrument(str): mandatory
+     |          bid_open_close (int)
+     |          bid_volume (int)
+     |          bid_price (float)
+     |          bid_hedge (int)
+     |          ask_open_close (int)
+     |          ask_volume (int)
+     |          ask_price (float)
+     |          ask_hedge (int)
+     |          order_ref (int)
+     |          cstype (int)
+     |          conn (int)
+     |          flag (int)
+     |          order_group (int)
+     |          order_ref_control (int)
+     |          good_in_session (bool)
+     |      account (str): trading account(default '', i.e. current account)
+     |  
+     |  insert_order(...)
+     |      Put a new order. Keyword arguments:
+     |      instrument (str): Instrument ID. Must be given for non comb position orders
+     |      action (int): 0-buy, 1-sell for normal orders(default 0)
+     |          for comb position orders: 0-make, 1-split
+     |          for freeze underlying orders: 0-freeze, 1-unfreeze
+     |          for cover orders: 0-normal to covered, 1-covered to normal
+     |      open_close (int): 0-open, 1-close, 3-close today, 4-close yesterday(default 0)
+     |      volume (int): default 1
+     |      price (float): default 0
+     |      type (int): order type, 0-limited price order, 1-FAK, 2-market order, 3-FOK (default 0)
+     |          for mark orders: 0-position offset, 1-abandon execution, 2-close futures position
+     |          for self close orders: 0-close self option position, 1-reserve option position, 2-sell close self futures position
+     |      order_ref (int): client assigned reference of the order, default 0
+     |      hedge (int): for normal orders 1-speculation, 2-arbitrage, 3-hedge
+     |          for SSE and SZSE: 1-normal, 3-covered
+     |      comb_hedge (int): for comb positoin orders 1-specspec, 2-spechedge, 3-hedgehedge, 4-hedgespec
+     |      cstype (int): Connection selection type, 0-any, 1-fixed, 2-preferred(default 0)
+     |      conn (int): Connection id if `cstype` is 1 or 2 (default 0)
+     |      flag (int):0-normal, 2-option execute, 3-abandon execute, 4-request for quote, 7-(DCE & GFEX)mark order, 8-(SHFE & INE)option self close, 9-freeze underlying, 10-(SSE &SZSE)cover (default 0, not needed for comb position and option execution together orders)
+     |      account (str): trading account(default ``, i.e. current account)
+     |      checked (int): 0-the order is not checked before it's sent to ydServer, 1-check before sent to ydServer, 2-check only, not sending order to ydServer (default 0; if 1 is given order ref will be allocated automatically by using "next_order_ref()", and argument "order_ref" will be ignored )
+     |      comb_position_def (str): comb position definition id, for comb position orders
+     |      comb_position_id (str): comb position detail id, needed by SSE decomb orders
+     |      instrument2 (str): second instrument id, for option execute together orders
+     |      order_group (int): group of order_ref (default 0)
+     |      order_ref_control (int): for groups other than group 0, 0-incremental, 1-strictly increment by one (default 0)
+     |      trigger_type (int): 0-not a trigger order, 1-stop profit, 2-stop loss (default 0)
+     |      trigger_price (float): default 0
+     |      good_in_session (bool): default False
+     |  
+     |  insert_quote(...)
+     |      Insert new quote. Keyword arguments:
+     |      instrument (str): Instrument ID. Must be given
+     |      bid_open_close (int): Refer to `open_close` argument to insert_order()
+     |      bid_volume (int): default 1
+     |      bid_price (float): default 0
+     |      bid_hedge (int): refer to `hedge` argument to insert_order()
+     |      ask_open_close (int): Refer to `open_close` argument to insert_order()
+     |      ask_volume (int): default 1
+     |      ask_price (float): default 0
+     |      ask_hedge (int): refer to `hedge` argument to insert_order()
+     |      order_ref (int): client assigned reference of the order, default 0
+     |      cstype (int): refer to `cstype` argument to insert_order()
+     |      conn (int): refer to `conn` argument to insert_order()
+     |      flag (int): Quote flag, 1-response to request for quote(default 0)
+     |      account (str): trading account(default ``, i.e. current account)
+     |      checked (int): refer to 'checked' argument of insert_order
+     |      order_group (int): refer to 'order_group' argument of insert_order
+     |      order_ref_control (int): refer to 'order_ref_control' argument of insert_order
+     |      good_in_session (bool): default False
+     |  
+     |  instruments()
+     |      Return all instruments iterator.
+     |  
+     |  margin_model(margin_model, account='')
+     |      Get margin model info.
+     |  
+     |  margin_model_params()
+     |      Return all margin model params iterator.
+     |  
+     |  margin_rate(instrument, hedge=1, account='')
+     |      Get margin rate of given instrument and hedge type.
+     |  
+     |  message_commission_rates()
+     |      Return all message commission rates iterator.
+     |  
+     |  my_account()
+     |      Return my account info.
+     |  
+     |  next_order_ref(order_group=0, update=True)
+     |      Get next order reference of given group.
+     |  
+     |  pre_holdings()
+     |      Return all pre-holdings iterator.
+     |  
+     |  pre_positions()
+     |      Return all pre-positions iterator.
+     |  
+     |  pre_spot_positions()
+     |      Return all pre spot positions iterator.
+     |  
+     |  products()
+     |      Return all products iterator.
+     |  
+     |  recalc_margin_profit()
+     |      Recalculate margin and position profit.
+     |  
+     |  recalc_position_market_value()
+     |      Recalculate position market value.
+     |  
+     |  select_connections(exchange, connection_list)
+     |      Set priority of exchange connections.
+     |      Each 4 bits in connection_list(64bit int) specifies a connection id, and lower bits has higher priority.
+     |      Return True if request is sent successfully
+     |  
+     |  session_id()
+     |      get current session id(available after login)
+     |  
+     |  set_trading_right(account, trading_right, instrument='', product='', exchange='', request_id=0, trading_right_source=0)
+     |      Set trading right. Keyword arguments:
+     |      account (str): target account id
+     |      trading_right (int): 0-allow trade, 1-close only, 2-forbid trade
+     |      instrument (str): instrument id
+     |      product (str): product id
+     |      exchange (str): exchange id
+     |      request_id (int): identify the request
+     |      trading_right_source (int):0-admin permanent change, 1-user permenent change, 2-admin temp change, 3-user temp change.
+     |  
+     |  start()
+     |      Start YDApi
+     |  
+     |  subscribe(instrument)
+     |      Subscribe marketdata.
+     |      instruemt (str): instrument id.
+     |  
+     |  system_params()
+     |      Return all system parameters iterator.
+     |  
+     |  trading_day()
+     |      get current trading day(available after login)
+     |  
+     |  unsubscribe(instrument)
+     |      Unsubscribe marketdata.
+     |      instruemt (str): instrument id.
+     |  
+     |  update_holding_external_frozen(account, instrument, frozen, request_id=0)
+     |      Update external sell frozen.
+     |      account (str): target account id
+     |      instrument (str):instrument id
+     |      frozen (int): external sell frozen volume
+     |      request_id (int): identify the request
+     |      Return True if request is sent successfully
+     |  
+     |  update_margin_rate(long_by_value, long_by_volume, short_by_value, short_by_volume, account='', product='', instrument='', underlying_instrument='', hedge_bitmap=-1, expire_date=0, multiplier=0, call_put_bitmap=0, request_id=0)
+     |      Update margin rate. Keyword arguments:
+     |      long_by_value (float): also for put margin ratio by value
+     |      long_by_volume (float): also for put margin ratio by volume and base margin rate
+     |      short_by_value (float): also for call margin ratio by value and linear factor
+     |      short_by_volume (float): also for call margin ratio by volume and lower boundary coefficient
+     |      account (str): target account id
+     |      product (str): product id
+     |      instrument (str): instrument id
+     |      underlying_instrument (str): underlying instrument id
+     |      hedge_bitmap (int): bit 1-speculation, bit 2-arbitrage, bit 3-hedge (bit 0 is the lowest bit)
+     |      expire_date (int): YYYYMMDD, 0-all dates
+     |      multiplier (int): contract multiplier, 0-all multipliers
+     |      call_put_bitmap (int): bit 1-call option, bit 2-put option, 0-all options
+     |      request_id (int): identify the request
+     |  
+     |  update_message_commission(account, exchange='', product='', instrument='', max_message=0, request_id=0)
+     |      Update message commission config.
+     |      account (str): target account id
+     |      exchange (str): exchange id
+     |      product (str): product id
+     |      instrument (str):instrument id
+     |      max_message (int): new position
+     |      request_id (int): identify the request
+     |      Return True if request is sent successfully
+     |  
+     |  update_spot_alive(exchange, requestid=0)
+     |      Acknowledge spot system is alive now.
+     |      exchange (str): exchange id
+     |      request_id (int): identify the request
+     |      Return True if request is sent successfully
+     |  
+     |  update_spot_position(account, instrument, position, request_id=0)
+     |      Update spot position.
+     |      account (str): target account id
+     |      instrument (str):instrument id
+     |      position (int): new position
+     |      request_id (int): identify the request
+     |      Return True if request is sent successfully
+     |  
+     |  ----------------------------------------------------------------------
+     |  Static methods defined here:
+     |  
+     |  __new__(*args, **kwargs) from builtins.type
+     |      Create and return a new object.  See help(type) for accurate signature.
+
+FUNCTIONS
+    nano_timestamp()
+        Get ydAPI nanosecond timestamp.
+    
+    version()
+        Get ydAPI version.
+
+FILE
+    /yd.src/ext/pyyd/lib/python3.9/site-packages/pyyd.cpython-39-x86_64-linux-gnu.so
+
+
