@@ -22,6 +22,15 @@ from order import (
 class MonitorListener(Listener):
     def __init__(self):
         super().__init__()
+        # 兼容旧版 order.py 的 Listener；新版字段缺失时由独立监控自行补齐。
+        if not hasattr(self, "connection_status"):
+            self.connection_status = {}
+        if not hasattr(self, "connection_lock"):
+            self.connection_lock = threading.Lock()
+        if not hasattr(self, "last_connection_event"):
+            self.last_connection_event = "UNKNOWN"
+        if not hasattr(self, "last_connection_event_at"):
+            self.last_connection_event_at = ""
         self.process_name = "INDEPENDENT"
         self.on_failed_cancel_order = None
 
