@@ -19,6 +19,7 @@ from pyyd import *
 LOG_DIR = PROJECT_ROOT / "logs"
 LOG_DIR.mkdir(parents=True, exist_ok=True)
 PAUSE_FILE = PROJECT_ROOT / "config" / "trading.pause"
+MONITOR_CONFIG_FILE = PROJECT_ROOT / "config" / "monitor.json"
 
 # ---------- 日志配置 ----------
 LOG_FORMAT = '%(asctime)s - %(name)s - %(levelname)s - %(message)s'
@@ -613,8 +614,7 @@ def non_negative_int(value):
 
 # ---------- 测试入口 ----------
 def parse_args():
-    monitor_config_path = PROJECT_ROOT / "config" / "monitor.json"
-    monitor_config = load_json(monitor_config_path) if monitor_config_path.exists() else {}
+    monitor_config = load_json(MONITOR_CONFIG_FILE) if MONITOR_CONFIG_FILE.exists() else {}
     parser = argparse.ArgumentParser(description="易达真实 Python API 人工测试")
     parser.add_argument("--account-config", default=str(PROJECT_ROOT / "config" / "account.json"))
     # 原生 yd.dll 对包含中文的绝对配置路径兼容性差；保持与官方示例一致，使用相对路径。
@@ -629,6 +629,7 @@ def parse_args():
     mode.add_argument("--set-trading-right", type=int, choices=(0, 1, 2), help="0允许交易，1只可平仓，2禁止交易")
     mode.add_argument("--pause-trading", action="store_true", help="创建本地暂停标志，阻止后续 --send")
     mode.add_argument("--resume-trading", action="store_true", help="清除本地暂停标志")
+    mode.add_argument("--show-monitor-config", action="store_true", help="显示 2.4/2.6 监测阈值配置，不连接柜台")
 
     parser.add_argument("--instrument")
     parser.add_argument("--action", type=int, choices=(0, 1))
@@ -659,7 +660,17 @@ def require_confirmed_account(args, config):
 def main():
     args = parse_args()
     try:
-        config = load_json(args.account_config)
+        if args.show_monitor_config:
+            resolved_config = {
+                "config_file": "config/monitor.json",
+                "order_threshold": args.order_threshold,
+                "order_cancel_threshold": args.order_cancel_threshold,
+                "duplicate_monitoring": "DISABLED",
+            }
+            monitor_logger.info("MONITOR_CONFIG_EVIDENCE %s", json.dumps(resolved_config, ensure_ascii=False))
+            print(json.dumps(resolved_config, ensure_ascii=False, indent=2))
+            return 0
+
         if args.pause_trading:
             set_local_trading_pause(True)
             return 0
@@ -667,7 +678,11 @@ def main():
             set_local_trading_pause(False)
             return 0
         if args.send and PAUSE_FILE.exists():
-            raise RuntimeError(f"策略已暂停，拒绝下达交易指令；请先执行 --resume-trading：{PAUSE_FILE}")
+            message = f"策略已暂停，拒绝下达交易指令；请先执行 --resume-trading：{PAUSE_FILE}"
+            error_logger.error("TRADE_BLOCKED control=LOCAL_STRATEGY_PAUSE message=%s", message)
+            raise RuntimeError(message)
+
+        config = load_json(args.account_config)
 
         trader = Trader(
             config["name"],

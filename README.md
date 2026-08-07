@@ -671,7 +671,24 @@ CONNECTION_MONITOR event=RECONNECTED
 
 ### 16.2 章节 2.4 和 2.6：报撤单统计、阈值和预警
 
-在已有真实报单命令后增加两个阈值参数：
+阈值已统一写入 `config/monitor.json`，正常测试不需要在命令末尾重复输入。先执行下面命令，截图控制台显示的配置；该命令不会连接柜台：
+
+```powershell
+.\.venv\Scripts\python.exe scripts\order.py --show-monitor-config
+```
+
+预期显示：
+
+```json
+{
+  "config_file": "config/monitor.json",
+  "order_threshold": 1,
+  "order_cancel_threshold": 2,
+  "duplicate_monitoring": "DISABLED"
+}
+```
+
+然后执行已有真实报单及自动撤单命令：
 
 ```powershell
 .\.venv\Scripts\python.exe scripts\order.py --send `
@@ -683,8 +700,6 @@ CONNECTION_MONITOR event=RECONNECTED
   --price $testPrice `
   --order-type $testOrderType `
   --hedge $testHedge `
-  --order-threshold 1 `
-  --order-cancel-threshold 2 `
   --auto-cancel
 ```
 
@@ -699,6 +714,13 @@ MONITOR_ALERT metric=order_count current=1 threshold=1
 MONITOR_STATS ... order_count=1 cancel_count=1 order_cancel_count=2
 MONITOR_ALERT metric=order_cancel_count current=2 threshold=2
 ```
+
+截图口径必须注意：
+
+- “报单笔数统计”截图应包含 `reason=ORDER_REQUEST order_count=1`。
+- “撤单笔数统计”截图必须在真实撤单请求发生后截取，并包含 `cancel_count=1`；只有 `reason=ORDER_REQUEST cancel_count=0` 的截图不能证明撤单统计功能。
+- 使用同一进程的 `--send --auto-cancel` 时，应继续看到 `order_cancel_count=2`。若委托已立即成交或被柜台拒绝，程序没有可撤订单，此次不能作为撤单测试证据，需换用能够挂单的测试参数重新执行。
+- `cancel_success_count=1` 只有收到柜台真实“已撤”回报后才成立；撤单请求已经发出但尚未收到回报时，它可以暂时为 0。
 
 字段口径：
 
@@ -755,6 +777,29 @@ COUNTER_ERROR
 
 不能在代码中写死错误码、构造假订单回报或手工修改日志。
 
+#### 持仓不足如何真实触发
+
+此项不能靠脚本猜测持仓。测试人员先在快期客户端确认某个合约、某一方向的可平持仓为 0，再向同一真实仿真账号提交 1 手平仓委托：
+
+```powershell
+# 示例口径：仅在快期中确认“卖平对应的多头可平持仓为 0”后使用。
+# 合约和价格必须替换为测试当日真实有效值。
+.\.venv\Scripts\python.exe scripts\order.py --send `
+  --confirm-account $testAccount `
+  --instrument $testInstrument `
+  --action 1 `
+  --open-close 1 `
+  --volume 1 `
+  --price $testPrice `
+  --order-type 0 `
+  --hedge 1 `
+  --wait-seconds 5
+```
+
+参数含义：`action=1` 为卖，`open_close=1` 为平；对于上期所或能源中心，如果柜台要求区分昨仓和今仓，应按实际零持仓类型把 `open_close` 改为 `3`（平今）或 `4`（平昨）。如果准备测试买平空头不足，则将 `action` 改为 `0`，并先确认空头可平持仓为 0。
+
+判定时必须同时看到 `REAL_ORDER_SEND_REQUEST`、带非零错误码的 `REAL_ORDER_CALLBACK source=LIVE` 和 `COUNTER_ERROR`。若先出现合约、价格、市场状态等其他错误，本次没有触发“持仓不足”，应修正对应参数后重测。真实错误文字以柜台回报为准。
+
 ### 16.5 章节 2.9：暂停下达交易指令
 
 方式一为本地策略暂停，不连接柜台即可设置：
@@ -765,9 +810,16 @@ COUNTER_ERROR
 
 暂停后执行任何 `--send`，程序必须返回退出码 1，并记录：
 
+```powershell
+# 不填写订单参数即可验证本地暂停；程序会在连接柜台和构造订单之前阻止发送。
+.\.venv\Scripts\python.exe scripts\order.py --send
+```
+
 ```text
 TRADE_BLOCKED control=LOCAL_STRATEGY_PAUSE
 ```
+
+完整截图顺序应为：先执行 `--pause-trading`，再执行 `--send` 并截取上述 `TRADE_BLOCKED`，最后执行 `--resume-trading`。本地暂停测试不产生真实委托。
 
 恢复策略：
 
@@ -844,6 +896,18 @@ MONITOR_STATS ... cancel_success_count=<实际成功数量>
 | `logs/error.log` | 参数拒绝、柜台错误、撤单失败和程序异常 |
 
 提交测试结果时至少保留 `trader.log`，并按测试章节附相应专项日志。所有日志均为 UTF-8；截图和提交前必须检查账号等敏感信息已经脱敏。
+
+可用下面的 PowerShell 命令生成 2.11 截图。第一条证明五个日志文件存在，后四条分别抽取交易、运行、监测和错误事件：
+
+```powershell
+Get-ChildItem .\logs\*.log | Select-Object Name, Length, LastWriteTime
+Select-String -Path .\logs\trading.log -Pattern 'REAL_ORDER|REAL_BATCH_CANCEL'
+Select-String -Path .\logs\runtime.log -Pattern 'TEST_MODE|STATE_CHANGE'
+Select-String -Path .\logs\monitor.log -Pattern 'CONNECTION_MONITOR|MONITOR_STATS|MONITOR_ALERT|TRADE_CONTROL'
+Select-String -Path .\logs\error.log -Pattern 'VALIDATION_REJECT|COUNTER_ERROR|TRADE_BLOCKED|TEST_FAILED'
+```
+
+某条查询没有输出不代表日志功能失效，而是本次运行尚未发生该类事件。例如只有真实柜台拒单后才会出现 `COUNTER_ERROR`。报告截图应从已经完成相应测试点的日志中截取，不能补写或复制伪造事件。
 
 ### 16.8 正式判定原则
 
