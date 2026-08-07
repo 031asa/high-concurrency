@@ -649,10 +649,10 @@ $env:PYTHONUTF8=1
 
 ### 16.1 章节 2.3：连接、断开和重连监测
 
-启动连接监测：
+启动独立监控进程。它同时负责 2.3 连接状态和 2.4/2.6 报撤单指标，本身不发送订单：
 
 ```powershell
-.\.venv\Scripts\python.exe scripts\order.py
+.\.venv\Scripts\python.exe scripts\monitor.py
 ```
 
 另开一个 PowerShell 窗口持续查看：
@@ -664,20 +664,20 @@ Get-Content .\logs\monitor.log -Wait
 日志事件：
 
 ```text
-CONNECTION_MONITOR event=CONNECTED
-CONNECTION_MONITOR event=DISCONNECTED
-CONNECTION_MONITOR event=RECONNECTED
+CONNECTION_MONITOR event=CONNECTED process=INDEPENDENT
+CONNECTION_MONITOR event=DISCONNECTED process=INDEPENDENT
+CONNECTION_MONITOR event=RECONNECTED process=INDEPENDENT
 ```
 
 `conn_status=0` 表示断开，`conn_status=1` 表示连接，数值来自易达 C++ API 头文件和 Python 回调，不是脚本自定义的连接结果。
 
 人工测试步骤：
 
-1. 柜台正常时启动程序，截图 `CONNECTED`。
+1. 柜台正常时启动 `monitor.py`，截图同一连接的 `CONNECTED process=INDEPENDENT`。
 2. 按测试负责人允许的方式断开测试网络或测试柜台连接，截图 `DISCONNECTED`。
 3. 恢复连接，等待同一交易所和连接编号出现 `RECONNECTED`，再截图。
 
-不能通过手工修改日志或构造回调代替真实断开和重连。
+三张截图必须包含相同的 `exchange` 和 `conn`。不能通过手工修改日志或构造回调代替真实断开和重连；如果易达没有发出相应 `exchange_conn_info` 回调，该测试不得判定通过。
 
 ### 16.2 章节 2.4 和 2.6：报撤单统计、阈值和预警
 

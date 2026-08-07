@@ -122,6 +122,7 @@ class Listener:
         self.has_caughtup = False
         self.login_error = None
         self.connection_status = {}
+        self.process_name = "TRADING"
         # 可动态绑定的回调
         self.on_login = None
         self.on_order = None
@@ -206,16 +207,19 @@ class Listener:
             event = "DISCONNECTED"
         self.connection_status[key] = status
         monitor_logger.info(
-            "EXCHANGE_CONNECTION exchange=%s conn=%s status=%s order_limit=%s cancel_limit=%s",
+            "EXCHANGE_CONNECTION exchange=%s conn=%s status=%s process=%s "
+            "order_limit=%s cancel_limit=%s",
             exchange,
             conn,
             status,
+            self.process_name,
             getattr(info, "order_limit", ""),
             getattr(info, "cancel_limit", ""),
         )
         monitor_logger.warning(
-            "CONNECTION_MONITOR event=%s exchange=%s conn=%s previous=%s current=%s",
+            "CONNECTION_MONITOR event=%s process=%s exchange=%s conn=%s previous=%s current=%s",
             event,
+            self.process_name,
             exchange,
             conn,
             previous,

@@ -22,6 +22,7 @@ from order import (
 class MonitorListener(Listener):
     def __init__(self):
         super().__init__()
+        self.process_name = "INDEPENDENT"
         self.on_failed_cancel_order = None
 
     def failed_cancel_order(self, failed):
