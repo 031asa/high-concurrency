@@ -379,13 +379,22 @@ REAL_TRADE_CALLBACK
 API_RESPONSE
 ```
 
-`insert_order` 返回 `True` 只表示请求已成功发送，不代表交易所已经接受或成交。最终结果必须看 `REAL_ORDER_CALLBACK` 中的状态和错误码。
+正式发送使用易达文档规定的 `checked=0`，即不在发送前做本地拦截，并通过 `next_order_ref()` 分配委托引用。这样资金不足、持仓不足等订单能够进入柜台/交易所回报链路。`insert_order` 返回 `True` 只表示请求已成功提交，不代表交易所已经接受或成交，最终结果必须看 `REAL_ORDER_CALLBACK` 中的状态和错误码。
+
+如果出现：
+
+```text
+REAL_ORDER_SEND_RETURN ... result=False
+REAL_ORDER_SEND_NOT_ACCEPTED
+```
+
+表示 API 本次没有接受发送请求，交易所没有收到订单，因此不能把它当作“持仓不足”等交易所回报。应检查连接状态、交易会话以及合约和订单类型后重新测试。
 
 正式报单成功至少需要日志出现：
 
 ```text
 REAL_ORDER_SEND_REQUEST
-REAL_ORDER_SEND_RETURN result=True
+REAL_ORDER_SEND_RETURN checked=0 order_ref=<真实委托引用> result=True
 REAL_ORDER_CALLBACK source=LIVE
 ```
 
@@ -724,7 +733,7 @@ MONITOR_ALERT metric=order_cancel_count current=2 threshold=2
 
 字段口径：
 
-- `order_count`：本进程调用真实 `insert_order(..., checked=1)` 的请求数。
+- `order_count`：本进程调用真实 `insert_order(..., checked=0)` 的请求数。
 - `cancel_count`：本进程调用单笔或批量撤单接口的订单数量。
 - `order_cancel_count`：`order_count + cancel_count`。
 - `cancel_success_count`：本进程收到真实 `status=已撤` 回调的订单数量。
@@ -799,6 +808,8 @@ COUNTER_ERROR
 参数含义：`action=1` 为卖，`open_close=1` 为平；对于上期所或能源中心，如果柜台要求区分昨仓和今仓，应按实际零持仓类型把 `open_close` 改为 `3`（平今）或 `4`（平昨）。如果准备测试买平空头不足，则将 `action` 改为 `0`，并先确认空头可平持仓为 0。
 
 判定时必须同时看到 `REAL_ORDER_SEND_REQUEST`、带非零错误码的 `REAL_ORDER_CALLBACK source=LIVE` 和 `COUNTER_ERROR`。若先出现合约、价格、市场状态等其他错误，本次没有触发“持仓不足”，应修正对应参数后重测。真实错误文字以柜台回报为准。
+
+注意：持仓不足示例必须使用上面的 `--order-type 0`（限价单）。如果使用 `--order-type 2`（市价单），而该合约或交易所不支持市价单，订单可能先因订单类型被拒绝，无法得到持仓不足结果。
 
 ### 16.5 章节 2.9：暂停下达交易指令
 

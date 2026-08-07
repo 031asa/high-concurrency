@@ -435,15 +435,33 @@ class Trader:
             message = f"策略已暂停，拒绝下达交易指令；恢复文件: {PAUSE_FILE}"
             error_logger.error("TRADE_BLOCKED control=LOCAL_STRATEGY_PAUSE message=%s", message)
             raise RuntimeError(message)
+        order_ref = self.api.next_order_ref()
+        send_params = dict(params, order_ref=order_ref)
         self.pending_signature = (
             params["instrument"], params["action"], params["open_close"],
             params["volume"], float(params["price"]), params["type"], params["hedge"]
         )
         self.auto_cancel = auto_cancel
         self._record_order_request()
-        trading_logger.warning("REAL_ORDER_SEND_REQUEST %s", json.dumps(params, ensure_ascii=False))
-        result = self.api.insert_order(**params, checked=1)
-        trading_logger.warning("REAL_ORDER_SEND_RETURN result=%s", result)
+        trading_logger.warning(
+            "REAL_ORDER_SEND_REQUEST checked=0 order_ref=%s %s",
+            order_ref,
+            json.dumps(params, ensure_ascii=False),
+        )
+        result = self.api.insert_order(**send_params, checked=0)
+        trading_logger.warning("REAL_ORDER_SEND_RETURN checked=0 order_ref=%s result=%s", order_ref, result)
+        if result is not True:
+            message = (
+                "YDApi.insert_order 未接受真实发送请求（checked=0）；"
+                "交易所不会产生订单回报，请检查连接、会话和订单参数"
+            )
+            error_logger.error(
+                "REAL_ORDER_SEND_NOT_ACCEPTED checked=0 order_ref=%s result=%s message=%s",
+                order_ref,
+                result,
+                message,
+            )
+            raise RuntimeError(message)
         return result
 
     def cancel_order(self, order):
