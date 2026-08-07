@@ -613,6 +613,8 @@ def non_negative_int(value):
 
 # ---------- 测试入口 ----------
 def parse_args():
+    monitor_config_path = PROJECT_ROOT / "config" / "monitor.json"
+    monitor_config = load_json(monitor_config_path) if monitor_config_path.exists() else {}
     parser = argparse.ArgumentParser(description="易达真实 Python API 人工测试")
     parser.add_argument("--account-config", default=str(PROJECT_ROOT / "config" / "account.json"))
     # 原生 yd.dll 对包含中文的绝对配置路径兼容性差；保持与官方示例一致，使用相对路径。
@@ -639,8 +641,8 @@ def parse_args():
     parser.add_argument("--auto-cancel", action="store_true", help="仅撤销本次程序识别到的已报订单")
     parser.add_argument("--cancel-limit", type=non_negative_int, default=0, help="批量撤单最多选择数量；0 表示全部未完成订单")
     parser.add_argument("--trading-right-source", type=int, choices=(1, 3), default=3, help="1用户永久设置，3用户临时设置")
-    parser.add_argument("--order-threshold", type=non_negative_int, default=0, help="当前进程报单笔数预警阈值；0 表示关闭")
-    parser.add_argument("--order-cancel-threshold", type=non_negative_int, default=0, help="当前进程报单+撤单笔数预警阈值；0 表示关闭")
+    parser.add_argument("--order-threshold", type=non_negative_int, default=non_negative_int(monitor_config.get("order_threshold", 0)), help="当前进程报单笔数预警阈值；默认读取 config/monitor.json")
+    parser.add_argument("--order-cancel-threshold", type=non_negative_int, default=non_negative_int(monitor_config.get("order_cancel_threshold", 0)), help="当前进程报单+撤单笔数预警阈值；默认读取 config/monitor.json")
     return parser.parse_args()
 
 def require_manual_order_input(args):
