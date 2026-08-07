@@ -45,6 +45,7 @@ yd_trader_real_api
 ├── logs
 │   └── trader.log               正式运行日志，禁止提交账号敏感信息
 ├── scripts
+│   ├── monitor.py               独立报撤单监控进程，只监听不交易
 │   └── order.py                 人工测试入口
 ├── vendor
 │   ├── wheels                   官方 Python 3.9 x64 wheel
@@ -635,16 +636,16 @@ $env:PYTHONUTF8=1
 | 报告章节 | 功能 | 本脚本实现 |
 |---|---|---|
 | 2.3 | 系统连接异常监测 | 使用真实 `exchange_conn_info` 回调识别连接、断开和重连 |
-| 2.4 | 报撤单笔数监测 | 统计当前进程真实报单请求、撤单请求和撤单成功回报 |
+| 2.4 | 报撤单笔数监测 | 独立 `monitor.py` 统计当前账号的实时订单和撤单回报 |
 | 2.5 | 重复报单监测 | 按本次任务要求不实现 |
-| 2.6 | 指标阈值与预警 | 支持报单笔数、报单加撤单笔数阈值 |
+| 2.6 | 指标阈值与预警 | 独立监控进程读取配置并执行报单、报单加撤单阈值预警 |
 | 2.7 | 交易指令检查 | 使用真实合约、Tick、最大/最小委托量和涨跌停数据拒绝错误指令 |
 | 2.8 | 柜台错误提示 | 展示订单、撤单和 API response 的真实错误码及错误文本 |
 | 2.9 | 暂停交易指令 | 支持本地策略暂停；支持官方 `set_trading_right` 账户权限设置 |
 | 2.10 | 批量撤单 | 使用真实 `find_orders(pending=True)` 和 `cancel_multi_orders` |
 | 2.11 | 日志记录 | 生成交易、运行、监测、错误四类日志，并保留汇总日志 |
 
-所有统计范围均为当前脚本进程的实时请求和实时回报，不把登录后同步的历史订单重复计入当前测试结果。
+2.4 和 2.6 的正式验收以独立 `monitor.py` 的 `scope=ACCOUNT_LIVE` 日志为准。它不发送订单，只统计 `caughtup` 之后当前账号收到的实时回报，并用 `(account, order_group, order_ref)` 去重。原 `order.py` 中的进程内统计继续保留，用于兼容此前 Git 版本。
 
 ### 16.1 章节 2.3：连接、断开和重连监测
 
@@ -697,7 +698,19 @@ CONNECTION_MONITOR event=RECONNECTED
 }
 ```
 
-然后执行已有真实报单及自动撤单命令：
+打开第一个 PowerShell 窗口，启动独立监控，并保持窗口运行：
+
+```powershell
+.\.venv\Scripts\python.exe scripts\monitor.py
+```
+
+必须先看到下面的就绪日志，才能开始报撤单测试：
+
+```text
+ACCOUNT_MONITOR_READY process=INDEPENDENT scope=ACCOUNT_LIVE
+```
+
+再打开第二个 PowerShell 窗口，执行已有真实报单及自动撤单命令：
 
 ```powershell
 .\.venv\Scripts\python.exe scripts\order.py --send `
@@ -712,33 +725,33 @@ CONNECTION_MONITOR event=RECONNECTED
   --auto-cancel
 ```
 
-上例表示：第 1 笔真实报单请求触发报单阈值预警；报单与撤单请求之和达到 2 时触发报撤单阈值预警。
+上例表示：独立监控收到第 1 笔新订单的真实回报时触发报单阈值预警；再收到该订单的真实已撤回报时，报单与撤单之和达到 2，并触发报撤单阈值预警。
 
 重点日志：
 
 ```text
-MONITOR_CONFIG order_threshold=1 order_cancel_threshold=2
-MONITOR_STATS ... order_count=1 cancel_count=0 order_cancel_count=1
-MONITOR_ALERT metric=order_count current=1 threshold=1
-MONITOR_STATS ... order_count=1 cancel_count=1 order_cancel_count=2
-MONITOR_ALERT metric=order_cancel_count current=2 threshold=2
+MONITOR_CONFIG process=INDEPENDENT scope=ACCOUNT_LIVE order_threshold=1 order_cancel_threshold=2
+MONITOR_STATS process=INDEPENDENT scope=ACCOUNT_LIVE reason=ORDER_CALLBACK order_count=1 cancel_count=0 order_cancel_count=1 cancel_success_count=0
+MONITOR_ALERT process=INDEPENDENT scope=ACCOUNT_LIVE metric=order_count current=1 threshold=1
+MONITOR_STATS process=INDEPENDENT scope=ACCOUNT_LIVE reason=CANCEL_CALLBACK order_count=1 cancel_count=1 order_cancel_count=2 cancel_success_count=1
+MONITOR_ALERT process=INDEPENDENT scope=ACCOUNT_LIVE metric=order_cancel_count current=2 threshold=2
 ```
 
 截图口径必须注意：
 
-- “报单笔数统计”截图应包含 `reason=ORDER_REQUEST order_count=1`。
-- “撤单笔数统计”截图必须在真实撤单请求发生后截取，并包含 `cancel_count=1`；只有 `reason=ORDER_REQUEST cancel_count=0` 的截图不能证明撤单统计功能。
-- 使用同一进程的 `--send --auto-cancel` 时，应继续看到 `order_cancel_count=2`。若委托已立即成交或被柜台拒绝，程序没有可撤订单，此次不能作为撤单测试证据，需换用能够挂单的测试参数重新执行。
-- `cancel_success_count=1` 只有收到柜台真实“已撤”回报后才成立；撤单请求已经发出但尚未收到回报时，它可以暂时为 0。
+- “报单笔数统计”截图应包含 `process=INDEPENDENT reason=ORDER_CALLBACK order_count=1`。
+- “撤单笔数统计”截图必须包含 `process=INDEPENDENT reason=CANCEL_CALLBACK cancel_count=1`；只有 `cancel_count=0` 的截图不能证明撤单统计功能。
+- 若委托已立即成交或被柜台拒绝，程序没有可撤订单，此次不能作为撤单测试证据，需换用能够挂单的测试参数重新执行。
+- `cancel_success_count=1` 只有独立监控收到真实“已撤”回报后才成立。撤单失败回报会计入 `cancel_count`，并输出 `reason=CANCEL_FAILED_CALLBACK`，但不会增加 `cancel_success_count`。
 
 字段口径：
 
-- `order_count`：本进程调用真实 `insert_order(..., checked=0)` 的请求数。
-- `cancel_count`：本进程调用单笔或批量撤单接口的订单数量。
+- `order_count`：独立监控在 `caughtup` 后首次收到的真实订单回报数量。
+- `cancel_count`：独立监控收到的真实已撤或撤单失败回报数量。
 - `order_cancel_count`：`order_count + cancel_count`。
-- `cancel_success_count`：本进程收到真实 `status=已撤` 回调的订单数量。
+- `cancel_success_count`：独立监控收到真实 `status=已撤` 回调的订单数量。
 
-`--order-threshold 0` 或 `--order-cancel-threshold 0` 表示关闭对应预警。2.5 的重复报单统计和重复报单阈值没有实现，也不会在日志中伪装为通过。
+监控进程重启后计数从 0 开始，因此同一轮截图测试期间不要关闭第一个窗口。`--order-threshold 0` 或 `--order-cancel-threshold 0` 表示关闭对应预警。2.5 的重复报单统计和重复报单阈值没有实现，也不会在日志中伪装为通过。
 
 ### 16.3 章节 2.7：错误交易指令检查
 
