@@ -674,6 +674,14 @@ CONNECTION_MONITOR event=DISCONNECTED process=INDEPENDENT
 CONNECTION_MONITOR event=RECONNECTED process=INDEPENDENT
 ```
 
+监控进程每 5 秒还会输出一条心跳，证明连接监测、报单监测、撤单监测和阈值监测进程仍在运行：
+
+```text
+MONITOR_HEARTBEAT process=INDEPENDENT state=RUNNING api_ready=1 connection_monitor=RUNNING connection_state=CONNECTED connection_source=YD_LAST_REPORTED reported_connected=1 reported_disconnected=0 order_monitor=RUNNING cancel_monitor=RUNNING threshold_monitor=RUNNING order_count=0 cancel_count=0 cancel_success_count=0
+```
+
+`state=RUNNING` 只表示独立监控进程仍在运行；`connection_state` 是易达最近一次连接回调汇总出的状态。`CONNECTED` 表示已回报的连接均在线，`DISCONNECTED` 表示均断开，`PARTIAL` 表示部分在线、部分断开；启动后若尚未收到易达连接回调则显示 `UNKNOWN`。脚本不会自行伪造“已连接”，真实连接、断开和重连的正式证据仍是上面的 `CONNECTION_MONITOR` 回调日志。
+
 `conn_status=0` 表示断开，`conn_status=1` 表示连接，数值来自易达 C++ API 头文件和 Python 回调，不是脚本自定义的连接结果。
 
 人工测试步骤：
@@ -699,6 +707,7 @@ CONNECTION_MONITOR event=RECONNECTED process=INDEPENDENT
   "config_file": "config/monitor.json",
   "order_threshold": 1,
   "order_cancel_threshold": 2,
+  "heartbeat_seconds": 5,
   "duplicate_monitoring": "DISABLED"
 }
 ```
@@ -759,6 +768,8 @@ MONITOR_ALERT process=INDEPENDENT scope=ACCOUNT_LIVE metric=order_cancel_count c
 - `cancel_success_count`：独立监控收到真实 `status=已撤` 回调的订单数量。
 
 监控进程重启后计数从 0 开始，因此同一轮截图测试期间不要关闭第一个窗口。`--order-threshold 0` 或 `--order-cancel-threshold 0` 表示关闭对应预警。2.5 的重复报单统计和重复报单阈值没有实现，也不会在日志中伪装为通过。
+
+心跳间隔由 `config/monitor.json` 的 `heartbeat_seconds` 控制，必须是大于 0 的整数。临时测试时也可用 `scripts/monitor.py --heartbeat-seconds 10` 覆盖，但不会改写配置文件。
 
 ### 16.3 章节 2.7：错误交易指令检查
 

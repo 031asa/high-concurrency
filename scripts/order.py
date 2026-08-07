@@ -124,6 +124,9 @@ class Listener:
         self.has_caughtup = False
         self.login_error = None
         self.connection_status = {}
+        self.connection_lock = threading.Lock()
+        self.last_connection_event = "UNKNOWN"
+        self.last_connection_event_at = ""
         self.process_name = "TRADING"
         # 可动态绑定的回调
         self.on_login = None
@@ -198,16 +201,19 @@ class Listener:
         conn = getattr(info, "conn", "")
         status = int(getattr(info, "conn_status", 0))
         key = (exchange, conn)
-        previous = self.connection_status.get(key)
-        if previous == status:
-            event = "UNCHANGED"
-        elif status == 1 and previous == 0:
-            event = "RECONNECTED"
-        elif status == 1:
-            event = "CONNECTED"
-        else:
-            event = "DISCONNECTED"
-        self.connection_status[key] = status
+        with self.connection_lock:
+            previous = self.connection_status.get(key)
+            if previous == status:
+                event = "UNCHANGED"
+            elif status == 1 and previous == 0:
+                event = "RECONNECTED"
+            elif status == 1:
+                event = "CONNECTED"
+            else:
+                event = "DISCONNECTED"
+            self.connection_status[key] = status
+            self.last_connection_event = event
+            self.last_connection_event_at = time.strftime("%Y-%m-%dT%H:%M:%S%z")
         monitor_logger.info(
             "EXCHANGE_CONNECTION exchange=%s conn=%s status=%s process=%s "
             "order_limit=%s cancel_limit=%s",
@@ -812,10 +818,12 @@ def main():
     args = parse_args()
     try:
         if args.show_monitor_config:
+            monitor_config = load_json(MONITOR_CONFIG_FILE) if MONITOR_CONFIG_FILE.exists() else {}
             resolved_config = {
                 "config_file": "config/monitor.json",
                 "order_threshold": args.order_threshold,
                 "order_cancel_threshold": args.order_cancel_threshold,
+                "heartbeat_seconds": monitor_config.get("heartbeat_seconds", 5),
                 "duplicate_monitoring": "DISABLED",
             }
             monitor_logger.info("MONITOR_CONFIG_EVIDENCE %s", json.dumps(resolved_config, ensure_ascii=False))

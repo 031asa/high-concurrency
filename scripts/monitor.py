@@ -34,7 +34,15 @@ class MonitorListener(Listener):
 class AccountOrderMonitor:
     """独立监听当前账号的真实订单回报，不发送任何交易指令。"""
 
-    def __init__(self, account, password, ini_path, order_threshold, order_cancel_threshold):
+    def __init__(
+        self,
+        account,
+        password,
+        ini_path,
+        order_threshold,
+        order_cancel_threshold,
+        heartbeat_seconds,
+    ):
         self.account = account
         self.listener = MonitorListener()
         self.listener.on_login = self._on_login
@@ -50,6 +58,9 @@ class AccountOrderMonitor:
         self.order_count = 0
         self.cancel_count = 0
         self.cancel_success_count = 0
+        self.heartbeat_seconds = heartbeat_seconds
+        self.last_order_event_at = ""
+        self.last_cancel_event_at = ""
         self.thresholds = {
             "order_count": order_threshold,
             "order_cancel_count": order_cancel_threshold,
@@ -59,9 +70,11 @@ class AccountOrderMonitor:
 
         monitor_logger.info(
             "MONITOR_CONFIG process=INDEPENDENT scope=ACCOUNT_LIVE "
-            "order_threshold=%s order_cancel_threshold=%s duplicate_monitoring=DISABLED",
+            "order_threshold=%s order_cancel_threshold=%s heartbeat_seconds=%s "
+            "duplicate_monitoring=DISABLED",
             order_threshold,
             order_cancel_threshold,
+            heartbeat_seconds,
         )
 
     @staticmethod
@@ -143,6 +156,7 @@ class AccountOrderMonitor:
                 previous_status,
                 status,
             )
+            self.last_order_event_at = time.strftime("%Y-%m-%dT%H:%M:%S%z")
 
             if not was_known and key not in self.counted_live_orders:
                 self.counted_live_orders.add(key)
@@ -152,6 +166,7 @@ class AccountOrderMonitor:
             if status == 2 and previous_status != 2 and key not in self.counted_live_cancels:
                 self.counted_live_cancels.add(key)
                 self.cancel_count += 1
+                self.last_cancel_event_at = time.strftime("%Y-%m-%dT%H:%M:%S%z")
             if status == 2 and previous_status != 2 and key not in self.counted_cancel_successes:
                 self.counted_cancel_successes.add(key)
                 self.cancel_success_count += 1
@@ -166,7 +181,52 @@ class AccountOrderMonitor:
                 return
             self.counted_live_cancels.add(key)
             self.cancel_count += 1
+            self.last_cancel_event_at = time.strftime("%Y-%m-%dT%H:%M:%S%z")
             self._snapshot("CANCEL_FAILED_CALLBACK")
+
+    def _heartbeat(self):
+        with self.listener.connection_lock:
+            statuses = list(self.listener.connection_status.values())
+            connected_count = sum(status == 1 for status in statuses)
+            disconnected_count = sum(status != 1 for status in statuses)
+            if not statuses:
+                connection_state = "UNKNOWN"
+            elif connected_count and disconnected_count:
+                connection_state = "PARTIAL"
+            elif connected_count:
+                connection_state = "CONNECTED"
+            else:
+                connection_state = "DISCONNECTED"
+            last_connection_event = self.listener.last_connection_event
+            last_connection_at = self.listener.last_connection_event_at or "NONE"
+
+        with self.lock:
+            order_count = self.order_count
+            cancel_count = self.cancel_count
+            cancel_success_count = self.cancel_success_count
+            last_order_at = self.last_order_event_at or "NONE"
+            last_cancel_at = self.last_cancel_event_at or "NONE"
+
+        monitor_logger.info(
+            "MONITOR_HEARTBEAT process=INDEPENDENT state=RUNNING api_ready=%s "
+            "connection_monitor=RUNNING connection_state=%s "
+            "connection_source=YD_LAST_REPORTED reported_connected=%s "
+            "reported_disconnected=%s order_monitor=RUNNING cancel_monitor=RUNNING "
+            "threshold_monitor=RUNNING order_count=%s cancel_count=%s "
+            "cancel_success_count=%s last_connection_event=%s last_connection_at=%s "
+            "last_order_at=%s last_cancel_at=%s",
+            int(self.listener.has_caughtup),
+            connection_state,
+            connected_count,
+            disconnected_count,
+            order_count,
+            cancel_count,
+            cancel_success_count,
+            last_connection_event,
+            last_connection_at,
+            last_order_at,
+            last_cancel_at,
+        )
 
     def start(self, timeout):
         result = self.api.start()
@@ -183,11 +243,21 @@ class AccountOrderMonitor:
             time.sleep(0.2)
 
     def wait(self, seconds):
-        if seconds > 0:
-            time.sleep(seconds)
-            return
-        while True:
-            time.sleep(1)
+        deadline = time.monotonic() + seconds if seconds > 0 else None
+        while deadline is None or time.monotonic() < deadline:
+            self._heartbeat()
+            remaining = self.heartbeat_seconds
+            if deadline is not None:
+                remaining = min(remaining, max(0, deadline - time.monotonic()))
+            if remaining > 0:
+                time.sleep(remaining)
+
+
+def positive_int(value):
+    number = int(value)
+    if number <= 0:
+        raise argparse.ArgumentTypeError("必须是大于 0 的整数")
+    return number
 
 
 def parse_args():
@@ -197,6 +267,12 @@ def parse_args():
     parser.add_argument("--api-config", default="config/ydClient.ini")
     parser.add_argument("--startup-timeout", type=int, default=60)
     parser.add_argument("--wait-seconds", type=non_negative_int, default=0, help="0 表示持续运行到 Ctrl+C")
+    parser.add_argument(
+        "--heartbeat-seconds",
+        type=positive_int,
+        default=positive_int(monitor_config.get("heartbeat_seconds", 5)),
+        help="心跳日志间隔秒数；默认读取 config/monitor.json",
+    )
     parser.add_argument(
         "--order-threshold",
         type=non_negative_int,
@@ -222,6 +298,7 @@ def main():
             args.api_config,
             args.order_threshold,
             args.order_cancel_threshold,
+            args.heartbeat_seconds,
         )
         monitor.start(args.startup_timeout)
         monitor.wait(args.wait_seconds)
