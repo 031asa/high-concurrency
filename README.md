@@ -603,7 +603,7 @@ $env:PYTHONUTF8=1
 
 ## 15. 当前已验证状态
 
-本机已经完成真实 `CONNECT_ONLY` 验证：
+2026-08-06 本机已经完成真实 `CONNECT_ONLY` 验证：
 
 - 官方 `pyyd` wheel 可以导入。
 - `YDApi.start()` 返回 `True`。
@@ -615,4 +615,241 @@ $env:PYTHONUTF8=1
 
 当前验证只证明真实 Python API 连接和登录正常，尚未完成必须发送到仿真交易所的正式报撤单测试，不能填写开仓、平仓、撤单等项目为通过。
 
+2026-08-07 复测时，`ydClient.ini` 中的仿真交易服务器 TCP 端口不可达。旧版和本分支均表现为 `YDApi.start()=True` 后收不到 `login/caughtup`、最终超时。此结果属于外部柜台当前不可用，不能记为连接成功，也不能进入真实报单步骤。
+
 下一阶段必须先由测试人员确定实际合约和订单参数，然后依次执行“查询真实合约数据 → `checked=2` 预检查 → 负责人确认 → 使用 `--send` 真实发送到仿真交易所 → 核对真实订单/成交/撤单回报”。
+
+## 16. 符合性测试 2.3 至 2.11 增量说明
+
+本节对应《程序化交易系统功能标准符合性测试过程记录报告》。现有 2.1 登录和 2.2 基础交易流程保持不变，新增能力全部建立在原 `YDApi`、`Listener` 和 `Trader` 结构上。
+
+| 报告章节 | 功能 | 本脚本实现 |
+|---|---|---|
+| 2.3 | 系统连接异常监测 | 使用真实 `exchange_conn_info` 回调识别连接、断开和重连 |
+| 2.4 | 报撤单笔数监测 | 统计当前进程真实报单请求、撤单请求和撤单成功回报 |
+| 2.5 | 重复报单监测 | 按本次任务要求不实现 |
+| 2.6 | 指标阈值与预警 | 支持报单笔数、报单加撤单笔数阈值 |
+| 2.7 | 交易指令检查 | 使用真实合约、Tick、最大/最小委托量和涨跌停数据拒绝错误指令 |
+| 2.8 | 柜台错误提示 | 展示订单、撤单和 API response 的真实错误码及错误文本 |
+| 2.9 | 暂停交易指令 | 支持本地策略暂停；支持官方 `set_trading_right` 账户权限设置 |
+| 2.10 | 批量撤单 | 使用真实 `find_orders(pending=True)` 和 `cancel_multi_orders` |
+| 2.11 | 日志记录 | 生成交易、运行、监测、错误四类日志，并保留汇总日志 |
+
+所有统计范围均为当前脚本进程的实时请求和实时回报，不把登录后同步的历史订单重复计入当前测试结果。
+
+### 16.1 章节 2.3：连接、断开和重连监测
+
+启动连接监测：
+
+```powershell
+.\.venv\Scripts\python.exe scripts\order.py
+```
+
+另开一个 PowerShell 窗口持续查看：
+
+```powershell
+Get-Content .\logs\monitor.log -Wait
+```
+
+日志事件：
+
+```text
+CONNECTION_MONITOR event=CONNECTED
+CONNECTION_MONITOR event=DISCONNECTED
+CONNECTION_MONITOR event=RECONNECTED
+```
+
+`conn_status=0` 表示断开，`conn_status=1` 表示连接，数值来自易达 C++ API 头文件和 Python 回调，不是脚本自定义的连接结果。
+
+人工测试步骤：
+
+1. 柜台正常时启动程序，截图 `CONNECTED`。
+2. 按测试负责人允许的方式断开测试网络或测试柜台连接，截图 `DISCONNECTED`。
+3. 恢复连接，等待同一交易所和连接编号出现 `RECONNECTED`，再截图。
+
+不能通过手工修改日志或构造回调代替真实断开和重连。
+
+### 16.2 章节 2.4 和 2.6：报撤单统计、阈值和预警
+
+在已有真实报单命令后增加两个阈值参数：
+
+```powershell
+.\.venv\Scripts\python.exe scripts\order.py --send `
+  --confirm-account $testAccount `
+  --instrument $testInstrument `
+  --action $testAction `
+  --open-close $testOpenClose `
+  --volume $testVolume `
+  --price $testPrice `
+  --order-type $testOrderType `
+  --hedge $testHedge `
+  --order-threshold 1 `
+  --order-cancel-threshold 2 `
+  --auto-cancel
+```
+
+上例表示：第 1 笔真实报单请求触发报单阈值预警；报单与撤单请求之和达到 2 时触发报撤单阈值预警。
+
+重点日志：
+
+```text
+MONITOR_CONFIG order_threshold=1 order_cancel_threshold=2
+MONITOR_STATS ... order_count=1 cancel_count=0 order_cancel_count=1
+MONITOR_ALERT metric=order_count current=1 threshold=1
+MONITOR_STATS ... order_count=1 cancel_count=1 order_cancel_count=2
+MONITOR_ALERT metric=order_cancel_count current=2 threshold=2
+```
+
+字段口径：
+
+- `order_count`：本进程调用真实 `insert_order(..., checked=1)` 的请求数。
+- `cancel_count`：本进程调用单笔或批量撤单接口的订单数量。
+- `order_cancel_count`：`order_count + cancel_count`。
+- `cancel_success_count`：本进程收到真实 `status=已撤` 回调的订单数量。
+
+`--order-threshold 0` 或 `--order-cancel-threshold 0` 表示关闭对应预警。2.5 的重复报单统计和重复报单阈值没有实现，也不会在日志中伪装为通过。
+
+### 16.3 章节 2.7：错误交易指令检查
+
+三个测试点都建议使用 `--check-only`，避免把故意错误的参数发送到交易所。参数仍然必须由测试人员提供。
+
+1. 合约代码错误：输入柜台中不存在的合约，日志应出现：
+
+```text
+VALIDATION_REJECT rule=INSTRUMENT_EXISTS
+```
+
+2. 最小变动价位错误：先从 `REAL_INSTRUMENT_DATA` 读取真实 Tick，再输入不是 Tick 整数倍的价格，日志应出现：
+
+```text
+VALIDATION_REJECT rule=PRICE_TICK
+```
+
+3. 单笔数量超限：先读取真实 `max_limit_order_volume` 或 `max_market_order_volume`，再输入超过该值的数量，日志应出现：
+
+```text
+VALIDATION_REJECT rule=MAX_ORDER_VOLUME
+```
+
+出现上述 `VALIDATION_REJECT` 后，程序退出码为 1，且日志中不得出现 `REAL_ORDER_SEND_REQUEST`。
+
+### 16.4 章节 2.8：真实柜台错误提示
+
+系统从以下真实回调记录错误：
+
+```text
+REAL_ORDER_CALLBACK
+FAILED_CANCEL_CALLBACK
+API_RESPONSE
+COUNTER_ERROR
+```
+
+错误文本来自随官方 API 提供的 `error_code.csv`。脚本根据 `SHFE/INE/DCE/CZCE/CFFEX/GFEX/SSE/SZSE` 选择对应交易所错误表；如果不是交易所错误，则回退到易达错误表。
+
+资金不足、持仓不足和市场状态不允许三个测试点必须在仿真柜台在线后，由负责人设计真实测试订单并使用 `--send` 发送。最终证据必须同时包含：
+
+- `REAL_ORDER_SEND_REQUEST`；
+- `REAL_ORDER_CALLBACK source=LIVE`；
+- 非零错误码；
+- `COUNTER_ERROR` 中对应的真实错误文本。
+
+不能在代码中写死错误码、构造假订单回报或手工修改日志。
+
+### 16.5 章节 2.9：暂停下达交易指令
+
+方式一为本地策略暂停，不连接柜台即可设置：
+
+```powershell
+.\.venv\Scripts\python.exe scripts\order.py --pause-trading
+```
+
+暂停后执行任何 `--send`，程序必须返回退出码 1，并记录：
+
+```text
+TRADE_BLOCKED control=LOCAL_STRATEGY_PAUSE
+```
+
+恢复策略：
+
+```powershell
+.\.venv\Scripts\python.exe scripts\order.py --resume-trading
+```
+
+方式二使用官方账户交易权限接口。只有负责人确认测试账号允许修改交易权限时才能执行：
+
+```powershell
+# 临时禁止交易
+.\.venv\Scripts\python.exe scripts\order.py --set-trading-right 2 `
+  --trading-right-source 3 `
+  --confirm-account $testAccount `
+  --wait-seconds 5
+
+# 测试结束后恢复允许交易
+.\.venv\Scripts\python.exe scripts\order.py --set-trading-right 0 `
+  --trading-right-source 3 `
+  --confirm-account $testAccount `
+  --wait-seconds 5
+```
+
+数值含义：`0` 允许交易，`1` 只可平仓，`2` 禁止交易；`source=3` 表示用户临时设置。最终结果必须查看 `TRADING_RIGHT_RETURN` 和后续 `API_RESPONSE`，返回请求成功不等于柜台已经接受权限变更。
+
+Python API 没有提供可确认的强制登出接口，因此本脚本不伪造“强制账号退出”测试。报告通过要求是上述方式中的一种或多种，本脚本实现了本地暂停和交易权限设置两种。
+
+### 16.6 章节 2.10：部分和全部批量撤单
+
+脚本只选择真实 API 返回的当前账号未完成订单，不生成订单对象。
+
+部分批量撤单，例如最多选择 2 笔：
+
+```powershell
+.\.venv\Scripts\python.exe scripts\order.py --batch-cancel `
+  --cancel-limit 2 `
+  --confirm-account $testAccount `
+  --wait-seconds 5
+```
+
+全部批量撤单：
+
+```powershell
+.\.venv\Scripts\python.exe scripts\order.py --batch-cancel `
+  --cancel-limit 0 `
+  --confirm-account $testAccount `
+  --wait-seconds 5
+```
+
+`--cancel-limit 0` 会选择当前账号全部未完成订单，执行前必须在快期客户端逐笔核对。官方接口单批最多 16 笔；超过 16 笔时脚本按 16 笔自动分批，仍逐笔计入 `cancel_count`。
+
+成功证据：
+
+```text
+BATCH_CANCEL_SELECTION
+REAL_BATCH_CANCEL_REQUEST
+REAL_BATCH_CANCEL_RETURN
+REAL_ORDER_CALLBACK ... status:已撤
+MONITOR_STATS ... cancel_success_count=<实际成功数量>
+```
+
+对于部分成交订单，订单必须仍由真实 API 返回为 `pending=True` 才会进入批量撤单列表。
+
+### 16.7 章节 2.11：分类日志
+
+每次运行都会保留原有汇总日志，并生成四类专项日志：
+
+| 文件 | 内容 |
+|---|---|
+| `logs/trader.log` | 所有类别的汇总日志，兼容原测试流程 |
+| `logs/trading.log` | 报单、成交、撤单和批量撤单 |
+| `logs/runtime.log` | 启动、登录、初始化、测试模式和停止 |
+| `logs/monitor.log` | 连接状态、报撤单统计、阈值预警和交易控制 |
+| `logs/error.log` | 参数拒绝、柜台错误、撤单失败和程序异常 |
+
+提交测试结果时至少保留 `trader.log`，并按测试章节附相应专项日志。所有日志均为 UTF-8；截图和提交前必须检查账号等敏感信息已经脱敏。
+
+### 16.8 正式判定原则
+
+- 2.3 必须看到真实连接、断开、重连回调。
+- 2.4、2.6、2.8、2.10 必须在柜台在线后以真实订单或撤单回报判定。
+- 2.7 必须证明错误参数被拒绝，并且没有 `REAL_ORDER_SEND_REQUEST`。
+- 2.9 本地暂停必须证明 `--send` 被阻止；账户权限方式必须查看异步 `API_RESPONSE`。
+- 2.11 必须检查五个日志文件包含对应真实事件。
+- 2.5 不在本次实现范围，不得填写为已完成。
