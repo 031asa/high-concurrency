@@ -59,6 +59,7 @@ class AccountOrderMonitor:
         self.cancel_count = 0
         self.cancel_success_count = 0
         self.heartbeat_seconds = heartbeat_seconds
+        self.api_start_state = "NOT_STARTED"
         self.last_order_event_at = ""
         self.last_cancel_event_at = ""
         self.thresholds = {
@@ -67,6 +68,8 @@ class AccountOrderMonitor:
         }
         self.threshold_alerted = set()
         self.lock = threading.Lock()
+        self.heartbeat_stop = threading.Event()
+        self.heartbeat_thread = None
 
         monitor_logger.info(
             "MONITOR_CONFIG process=INDEPENDENT scope=ACCOUNT_LIVE "
@@ -128,6 +131,8 @@ class AccountOrderMonitor:
             )
 
     def _on_caughtup(self):
+        with self.lock:
+            self.api_start_state = "READY"
         monitor_logger.warning(
             "ACCOUNT_MONITOR_READY process=INDEPENDENT scope=ACCOUNT_LIVE "
             "account=%s historical_orders=%s",
@@ -201,6 +206,7 @@ class AccountOrderMonitor:
             last_connection_at = self.listener.last_connection_event_at or "NONE"
 
         with self.lock:
+            api_start_state = self.api_start_state
             order_count = self.order_count
             cancel_count = self.cancel_count
             cancel_success_count = self.cancel_success_count
@@ -208,13 +214,14 @@ class AccountOrderMonitor:
             last_cancel_at = self.last_cancel_event_at or "NONE"
 
         monitor_logger.info(
-            "MONITOR_HEARTBEAT process=INDEPENDENT state=RUNNING api_ready=%s "
+            "MONITOR_HEARTBEAT process=INDEPENDENT state=RUNNING api_start_state=%s api_ready=%s "
             "connection_monitor=RUNNING connection_state=%s "
             "connection_source=YD_LAST_REPORTED reported_connected=%s "
             "reported_disconnected=%s order_monitor=RUNNING cancel_monitor=RUNNING "
             "threshold_monitor=RUNNING order_count=%s cancel_count=%s "
             "cancel_success_count=%s last_connection_event=%s last_connection_at=%s "
             "last_order_at=%s last_cancel_at=%s",
+            api_start_state,
             int(self.listener.has_caughtup),
             connection_state,
             connected_count,
@@ -228,10 +235,44 @@ class AccountOrderMonitor:
             last_cancel_at,
         )
 
+    def _heartbeat_loop(self):
+        while not self.heartbeat_stop.wait(self.heartbeat_seconds):
+            self._heartbeat()
+
+    def start_heartbeat(self):
+        if self.heartbeat_thread and self.heartbeat_thread.is_alive():
+            return
+        self.heartbeat_stop.clear()
+        self._heartbeat()
+        self.heartbeat_thread = threading.Thread(
+            target=self._heartbeat_loop,
+            name="yd-monitor-heartbeat",
+            daemon=True,
+        )
+        self.heartbeat_thread.start()
+
+    def stop_heartbeat(self):
+        self.heartbeat_stop.set()
+        if self.heartbeat_thread and self.heartbeat_thread.is_alive():
+            self.heartbeat_thread.join(timeout=1)
+
     def start(self, timeout):
-        result = self.api.start()
+        with self.lock:
+            self.api_start_state = "CALLING"
+        self.start_heartbeat()
+        try:
+            result = self.api.start()
+        except Exception:
+            with self.lock:
+                self.api_start_state = "FAILED"
+            raise
+        with self.lock:
+            if not self.listener.has_caughtup:
+                self.api_start_state = "RETURNED"
         runtime_logger.info("ACCOUNT_MONITOR_START process=INDEPENDENT result=%s", result)
         if result is False:
+            with self.lock:
+                self.api_start_state = "FAILED"
             raise RuntimeError("YDApi.start() 返回 False")
 
         deadline = time.time() + timeout
@@ -243,14 +284,11 @@ class AccountOrderMonitor:
             time.sleep(0.2)
 
     def wait(self, seconds):
-        deadline = time.monotonic() + seconds if seconds > 0 else None
-        while deadline is None or time.monotonic() < deadline:
-            self._heartbeat()
-            remaining = self.heartbeat_seconds
-            if deadline is not None:
-                remaining = min(remaining, max(0, deadline - time.monotonic()))
-            if remaining > 0:
-                time.sleep(remaining)
+        if seconds > 0:
+            self.heartbeat_stop.wait(seconds)
+            return
+        while not self.heartbeat_stop.wait(1):
+            pass
 
 
 def positive_int(value):
@@ -290,6 +328,7 @@ def parse_args():
 
 def main():
     args = parse_args()
+    monitor = None
     try:
         config = load_json(args.account_config)
         monitor = AccountOrderMonitor(
@@ -313,6 +352,9 @@ def main():
             exc,
         )
         return 1
+    finally:
+        if monitor is not None:
+            monitor.stop_heartbeat()
 
 
 if __name__ == "__main__":

@@ -674,13 +674,13 @@ CONNECTION_MONITOR event=DISCONNECTED process=INDEPENDENT
 CONNECTION_MONITOR event=RECONNECTED process=INDEPENDENT
 ```
 
-监控进程每 5 秒还会输出一条心跳，证明连接监测、报单监测、撤单监测和阈值监测进程仍在运行：
+监控进程在调用 `YDApi.start()` 之前立即启动心跳线程，之后每 5 秒输出一条，证明连接监测、报单监测、撤单监测和阈值监测进程仍在运行。即使易达启动或登录阶段等待较久，心跳也不会消失：
 
 ```text
-MONITOR_HEARTBEAT process=INDEPENDENT state=RUNNING api_ready=1 connection_monitor=RUNNING connection_state=CONNECTED connection_source=YD_LAST_REPORTED reported_connected=1 reported_disconnected=0 order_monitor=RUNNING cancel_monitor=RUNNING threshold_monitor=RUNNING order_count=0 cancel_count=0 cancel_success_count=0
+MONITOR_HEARTBEAT process=INDEPENDENT state=RUNNING api_start_state=CALLING api_ready=0 connection_monitor=RUNNING connection_state=UNKNOWN connection_source=YD_LAST_REPORTED reported_connected=0 reported_disconnected=0 order_monitor=RUNNING cancel_monitor=RUNNING threshold_monitor=RUNNING order_count=0 cancel_count=0 cancel_success_count=0
 ```
 
-`state=RUNNING` 只表示独立监控进程仍在运行；`connection_state` 是易达最近一次连接回调汇总出的状态。`CONNECTED` 表示已回报的连接均在线，`DISCONNECTED` 表示均断开，`PARTIAL` 表示部分在线、部分断开；启动后若尚未收到易达连接回调则显示 `UNKNOWN`。脚本不会自行伪造“已连接”，真实连接、断开和重连的正式证据仍是上面的 `CONNECTION_MONITOR` 回调日志。
+`state=RUNNING` 只表示独立监控进程仍在运行；`api_start_state=CALLING` 表示正在等待易达 `start()` 返回，`READY` 和 `api_ready=1` 表示已经收到 `caughtup`。`connection_state` 是易达最近一次连接回调汇总出的状态：`CONNECTED` 表示已回报的连接均在线，`DISCONNECTED` 表示均断开，`PARTIAL` 表示部分在线、部分断开；尚未收到易达连接回调则显示 `UNKNOWN`。脚本不会自行伪造“已连接”，真实连接、断开和重连的正式证据仍是上面的 `CONNECTION_MONITOR` 回调日志。
 
 `conn_status=0` 表示断开，`conn_status=1` 表示连接，数值来自易达 C++ API 头文件和 Python 回调，不是脚本自定义的连接结果。
 
