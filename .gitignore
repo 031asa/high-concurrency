@@ -1,5 +1,6 @@
 config/account.json
 config/ydClient.ini
+config/trading.pause
 logs/
 __pycache__/
 *.pyc

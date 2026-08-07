@@ -1,4 +1,5 @@
 import os
+import sys
 import argparse
 import logging
 import time
@@ -17,17 +18,33 @@ from pyyd import *
 
 LOG_DIR = PROJECT_ROOT / "logs"
 LOG_DIR.mkdir(parents=True, exist_ok=True)
+PAUSE_FILE = PROJECT_ROOT / "config" / "trading.pause"
 
 # ---------- 日志配置 ----------
+LOG_FORMAT = '%(asctime)s - %(name)s - %(levelname)s - %(message)s'
 logging.basicConfig(
     level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    format=LOG_FORMAT,
     handlers=[
         logging.FileHandler(LOG_DIR / 'trader.log', encoding='utf-8'),
         logging.StreamHandler()
     ]
 )
 logger = logging.getLogger("Trader")
+
+def category_logger(name, filename):
+    category = logging.getLogger(f"Trader.{name}")
+    category.setLevel(logging.INFO)
+    if not category.handlers:
+        handler = logging.FileHandler(LOG_DIR / filename, encoding='utf-8')
+        handler.setFormatter(logging.Formatter(LOG_FORMAT))
+        category.addHandler(handler)
+    return category
+
+runtime_logger = category_logger("Runtime", "runtime.log")
+trading_logger = category_logger("Trading", "trading.log")
+monitor_logger = category_logger("Monitor", "monitor.log")
+error_logger = category_logger("Error", "error.log")
 
 def load_json(path):
     if not os.path.exists(path):
@@ -55,8 +72,32 @@ def load_error_dict(path=PROJECT_ROOT / "error_code.csv"):
 
 ERROR_DICT = load_error_dict()
 
+EXCHANGE_ERROR_SOURCE = {
+    "SHFE": "上期所/能源所",
+    "INE": "上期所/能源所",
+    "DCE": "大商所",
+    "CZCE": "郑商所",
+    "CFFEX": "中金所",
+    "GFEX": "广期所",
+    "SSE": "上交所",
+    "SZSE": "深交所",
+}
+
 def get_error_msg(error_code, source="易达"):
-    return ERROR_DICT.get((str(error_code), source), f"未知错误({error_code})")
+    code = str(error_code)
+    return ERROR_DICT.get((code, source), ERROR_DICT.get((code, "易达"), f"未知错误({error_code})"))
+
+def error_source(exchange):
+    return EXCHANGE_ERROR_SOURCE.get(str(exchange).upper(), "易达")
+
+def reject_validation(rule, message, **context):
+    error_logger.error(
+        "VALIDATION_REJECT rule=%s message=%s context=%s",
+        rule,
+        message,
+        json.dumps(context, ensure_ascii=False, default=str),
+    )
+    raise ValueError(message)
 
 def mask_account(account):
     if len(account) <= 4:
@@ -78,6 +119,7 @@ class Listener:
     def __init__(self):
         self.has_caughtup = False
         self.login_error = None
+        self.connection_status = {}
         # 可动态绑定的回调
         self.on_login = None
         self.on_order = None
@@ -116,21 +158,23 @@ class Listener:
             print(f"[成交] {t.instrument} 价:{t.price} 量:{t.volume}")
 
     def failed_cancel_order(self, failed):
-        logger.error(
+        exchange = getattr(failed, "exchange", "")
+        error = getattr(failed, "errno", "")
+        error_logger.error(
             "FAILED_CANCEL_CALLBACK exchange=%s order_ref=%s order_group=%s "
             "order_sysid=%s error=%s message=%s",
-            getattr(failed, "exchange", ""),
+            exchange,
             getattr(failed, "order_ref", ""),
             getattr(failed, "order_group", ""),
             getattr(failed, "order_sysid", ""),
-            getattr(failed, "errno", ""),
-            get_error_msg(getattr(failed, "errno", "")),
+            error,
+            get_error_msg(error, error_source(exchange)),
         )
 
     def response(self, errorno, request_type, request_id=0):
-        level = logging.INFO if errorno == 0 else logging.ERROR
-        logger.log(
-            level,
+        target_logger = runtime_logger if errorno == 0 else error_logger
+        target_logger.log(
+            logging.INFO if errorno == 0 else logging.ERROR,
             "API_RESPONSE error=%s message=%s request_type=%s request_id=%s",
             errorno,
             "" if errorno == 0 else get_error_msg(errorno),
@@ -139,21 +183,43 @@ class Listener:
         )
 
     def trading_segment(self, exchange, segment_time):
-        logger.info("TRADING_SEGMENT exchange=%s time=%s", exchange, segment_time)
+        runtime_logger.info("TRADING_SEGMENT exchange=%s time=%s", exchange, segment_time)
 
     def exchange_conn_info(self, info):
-        logger.info(
+        exchange = getattr(info, "exchange", "")
+        conn = getattr(info, "conn", "")
+        status = int(getattr(info, "conn_status", 0))
+        key = (exchange, conn)
+        previous = self.connection_status.get(key)
+        if previous == status:
+            event = "UNCHANGED"
+        elif status == 1 and previous == 0:
+            event = "RECONNECTED"
+        elif status == 1:
+            event = "CONNECTED"
+        else:
+            event = "DISCONNECTED"
+        self.connection_status[key] = status
+        monitor_logger.info(
             "EXCHANGE_CONNECTION exchange=%s conn=%s status=%s order_limit=%s cancel_limit=%s",
-            getattr(info, "exchange", ""),
-            getattr(info, "conn", ""),
-            getattr(info, "conn_status", ""),
+            exchange,
+            conn,
+            status,
             getattr(info, "order_limit", ""),
             getattr(info, "cancel_limit", ""),
+        )
+        monitor_logger.warning(
+            "CONNECTION_MONITOR event=%s exchange=%s conn=%s previous=%s current=%s",
+            event,
+            exchange,
+            conn,
+            previous,
+            status,
         )
 
 # ---------- 交易核心类 ----------
 class Trader:
-    def __init__(self, account, password, ini_path):
+    def __init__(self, account, password, ini_path, order_threshold=0, order_cancel_threshold=0):
         self.account = account
         # 1. 先创建监听器并绑定回调
         self.listener = Listener()
@@ -171,13 +237,29 @@ class Trader:
         self.pending_signature = None
         self.auto_cancel = False
         self.cancel_requested = set()
+        self.cancel_succeeded = set()
         self.trades = []      # 成交记录
         self.positions = {}   # 持仓
+        self.monitor_counts = {
+            "order_count": 0,
+            "cancel_count": 0,
+            "cancel_success_count": 0,
+        }
+        self.thresholds = {
+            "order_count": order_threshold,
+            "order_cancel_count": order_cancel_threshold,
+        }
+        self.threshold_alerted = set()
         self._running = False
+        monitor_logger.info(
+            "MONITOR_CONFIG order_threshold=%s order_cancel_threshold=%s duplicate_monitoring=DISABLED",
+            order_threshold,
+            order_cancel_threshold,
+        )
 
     def start(self, timeout=60):
         r = self.api.start()
-        logger.info(f"YDApi.start() = {r}")
+        runtime_logger.info(f"YDApi.start() = {r}")
         if r is False:
             raise RuntimeError("YDApi.start() 返回 False")
         deadline = time.time() + timeout
@@ -188,12 +270,16 @@ class Trader:
                 raise TimeoutError(f"等待 caughtup 超时: {timeout} 秒")
             time.sleep(0.2)
         self._running = True
-        logger.info("REAL_API_READY account=%s data_source=YDApi", mask_account(self.account))
+        runtime_logger.info("REAL_API_READY account=%s data_source=YDApi", mask_account(self.account))
 
     def get_real_instrument_data(self, instrument):
         info = self.api.get_instrument(instrument)
         if info is None:
-            raise ValueError(f"YDApi.get_instrument 未找到合约: {instrument}")
+            reject_validation(
+                "INSTRUMENT_EXISTS",
+                f"YDApi.get_instrument 未找到合约: {instrument}",
+                instrument=instrument,
+            )
         market = self.api.get_marketdata(instrument)
         result = {
             "instrument": instrument,
@@ -209,7 +295,7 @@ class Trader:
             "bid_price": getattr(market, "bid_price", None) if market else None,
             "ask_price": getattr(market, "ask_price", None) if market else None,
         }
-        logger.info("REAL_INSTRUMENT_DATA %s", json.dumps(result, ensure_ascii=False, default=str))
+        runtime_logger.info("REAL_INSTRUMENT_DATA %s", json.dumps(result, ensure_ascii=False, default=str))
         return info, market
 
     def validate_with_real_api_data(self, params):
@@ -223,21 +309,86 @@ class Trader:
             minimum = getattr(info, "min_limit_order_volume", 0)
             maximum = getattr(info, "max_limit_order_volume", 0)
         if minimum and volume < minimum:
-            raise ValueError(f"委托数量 {volume} 小于真实 API 下限 {minimum}")
+            reject_validation(
+                "MIN_ORDER_VOLUME",
+                f"委托数量 {volume} 小于真实 API 下限 {minimum}",
+                instrument=params["instrument"],
+                volume=volume,
+                minimum=minimum,
+            )
         if maximum and volume > maximum:
-            raise ValueError(f"委托数量 {volume} 超过真实 API 上限 {maximum}")
+            reject_validation(
+                "MAX_ORDER_VOLUME",
+                f"委托数量 {volume} 超过真实 API 上限 {maximum}",
+                instrument=params["instrument"],
+                volume=volume,
+                maximum=maximum,
+            )
         if order_type != 2:
             price = Decimal(str(params["price"]))
             tick = Decimal(str(getattr(info, "tick", 0)))
             if tick > 0 and price % tick != 0:
-                raise ValueError(f"价格 {price} 不是真实 API Tick {tick} 的整数倍")
+                reject_validation(
+                    "PRICE_TICK",
+                    f"价格 {price} 不是真实 API Tick {tick} 的整数倍",
+                    instrument=params["instrument"],
+                    price=price,
+                    tick=tick,
+                )
             if market:
                 upper = getattr(market, "upper_limit_price", None)
                 lower = getattr(market, "lower_limit_price", None)
                 if upper is not None and price > Decimal(str(upper)):
-                    raise ValueError(f"价格 {price} 高于真实涨停价 {upper}")
+                    reject_validation(
+                        "UPPER_LIMIT_PRICE",
+                        f"价格 {price} 高于真实涨停价 {upper}",
+                        instrument=params["instrument"],
+                        price=price,
+                        upper=upper,
+                    )
                 if lower is not None and price < Decimal(str(lower)):
-                    raise ValueError(f"价格 {price} 低于真实跌停价 {lower}")
+                    reject_validation(
+                        "LOWER_LIMIT_PRICE",
+                        f"价格 {price} 低于真实跌停价 {lower}",
+                        instrument=params["instrument"],
+                        price=price,
+                        lower=lower,
+                    )
+
+    def _monitor_snapshot(self, reason):
+        order_count = self.monitor_counts["order_count"]
+        cancel_count = self.monitor_counts["cancel_count"]
+        order_cancel_count = order_count + cancel_count
+        monitor_logger.info(
+            "MONITOR_STATS scope=PROCESS_LIVE reason=%s order_count=%s cancel_count=%s "
+            "order_cancel_count=%s cancel_success_count=%s",
+            reason,
+            order_count,
+            cancel_count,
+            order_cancel_count,
+            self.monitor_counts["cancel_success_count"],
+        )
+        self._check_threshold("order_count", order_count)
+        self._check_threshold("order_cancel_count", order_cancel_count)
+
+    def _check_threshold(self, metric, current):
+        threshold = self.thresholds[metric]
+        if threshold > 0 and current >= threshold and metric not in self.threshold_alerted:
+            self.threshold_alerted.add(metric)
+            monitor_logger.warning(
+                "MONITOR_ALERT metric=%s current=%s threshold=%s",
+                metric,
+                current,
+                threshold,
+            )
+
+    def _record_order_request(self):
+        self.monitor_counts["order_count"] += 1
+        self._monitor_snapshot("ORDER_REQUEST")
+
+    def _record_cancel_request(self, count, reason):
+        self.monitor_counts["cancel_count"] += count
+        self._monitor_snapshot(reason)
 
     @staticmethod
     def _order_signature(order):
@@ -273,20 +424,25 @@ class Trader:
         return params
 
     def check_order(self, **params):
-        logger.info("REAL_ORDER_CHECK_REQUEST %s", json.dumps(params, ensure_ascii=False))
+        trading_logger.info("REAL_ORDER_CHECK_REQUEST %s", json.dumps(params, ensure_ascii=False))
         result = self.api.insert_order(**params, checked=2)
-        logger.info("REAL_ORDER_CHECK_RETURN result=%s", result)
+        trading_logger.info("REAL_ORDER_CHECK_RETURN result=%s", result)
         return result
 
     def send_order(self, auto_cancel=False, **params):
+        if PAUSE_FILE.exists():
+            message = f"策略已暂停，拒绝下达交易指令；恢复文件: {PAUSE_FILE}"
+            error_logger.error("TRADE_BLOCKED control=LOCAL_STRATEGY_PAUSE message=%s", message)
+            raise RuntimeError(message)
         self.pending_signature = (
             params["instrument"], params["action"], params["open_close"],
             params["volume"], float(params["price"]), params["type"], params["hedge"]
         )
         self.auto_cancel = auto_cancel
-        logger.warning("REAL_ORDER_SEND_REQUEST %s", json.dumps(params, ensure_ascii=False))
+        self._record_order_request()
+        trading_logger.warning("REAL_ORDER_SEND_REQUEST %s", json.dumps(params, ensure_ascii=False))
         result = self.api.insert_order(**params, checked=1)
-        logger.warning("REAL_ORDER_SEND_RETURN result=%s", result)
+        trading_logger.warning("REAL_ORDER_SEND_RETURN result=%s", result)
         return result
 
     def cancel_order(self, order):
@@ -295,7 +451,9 @@ class Trader:
         order_group = int(getattr(order, "order_group", 0))
         order_ref = int(getattr(order, "order_ref", 0))
         order_sysid = getattr(order, "order_sysid", -1)
-        logger.warning(
+        self.cancel_requested.add(key)
+        self._record_cancel_request(1, "CANCEL_REQUEST")
+        trading_logger.warning(
             "REAL_CANCEL_REQUEST key=%s exchange=%s order_sysid=%s",
             key, exchange, order_sysid,
         )
@@ -308,15 +466,73 @@ class Trader:
             order_group=order_group,
         )
 
+    def batch_cancel_pending(self, limit=0):
+        pending = [
+            order for order in self.api.find_orders(account=self.account, pending=True)
+            if getattr(order, "account", self.account) in ("", self.account)
+        ]
+        pending.sort(key=lambda order: (
+            getattr(order, "time", ""),
+            getattr(order, "order_group", 0),
+            getattr(order, "order_ref", 0),
+        ))
+        selected = pending[:limit] if limit > 0 else pending
+        if not selected:
+            monitor_logger.warning("BATCH_CANCEL_SELECTION pending=0 selected=0 limit=%s", limit)
+            return []
+
+        keys = [self._order_key(order) for order in selected]
+        self.cancel_requested.update(keys)
+        monitor_logger.warning(
+            "BATCH_CANCEL_SELECTION pending=%s selected=%s limit=%s keys=%s",
+            len(pending),
+            len(selected),
+            limit,
+            keys,
+        )
+        results = []
+        for offset in range(0, len(selected), 16):
+            batch = selected[offset:offset + 16]
+            self._record_cancel_request(len(batch), "BATCH_CANCEL_REQUEST")
+            trading_logger.warning(
+                "REAL_BATCH_CANCEL_REQUEST batch=%s count=%s",
+                offset // 16 + 1,
+                len(batch),
+            )
+            result = self.api.cancel_multi_orders(batch, account=self.account)
+            trading_logger.warning(
+                "REAL_BATCH_CANCEL_RETURN batch=%s result=%s",
+                offset // 16 + 1,
+                result,
+            )
+            results.append(result)
+        return results
+
+    def set_account_trading_right(self, trading_right, source=3):
+        monitor_logger.warning(
+            "TRADING_RIGHT_REQUEST account=%s trading_right=%s source=%s",
+            mask_account(self.account),
+            trading_right,
+            source,
+        )
+        result = self.api.set_trading_right(
+            account=self.account,
+            trading_right=trading_right,
+            request_id=int(time.time()),
+            trading_right_source=source,
+        )
+        monitor_logger.warning("TRADING_RIGHT_RETURN result=%s", result)
+        return result
+
     # ---------- 内部回调处理 ----------
     def _on_login(self, error, maxorderref, ismonitor):
         if error == 0:
-            logger.info(f"登录成功，max_order_ref={maxorderref}, is_admin={ismonitor}")
+            runtime_logger.info(f"登录成功，max_order_ref={maxorderref}, is_admin={ismonitor}")
         else:
-            logger.error(f"登录失败: {get_error_msg(error)}")
+            error_logger.error(f"登录失败: {get_error_msg(error)}")
 
     def _on_caughtup(self):
-        logger.info("历史数据同步完成")
+        runtime_logger.info("历史数据同步完成")
 
     def _on_order(self, o):
         key = self._order_key(o)
@@ -332,22 +548,37 @@ class Trader:
         if o.trade > 0:
             msg += f" 已成:{o.trade}"
         if o.errno != 0:
-            msg += f" [错误:{get_error_msg(o.errno)}]"
+            msg += f" [错误:{get_error_msg(o.errno, error_source(getattr(o, 'exchange', '')))}]"
         if o.status == 2 and o.cancel_time:
             msg += f" 撤单时间:{o.cancel_time}"
         source = "LIVE" if self.listener.has_caughtup else "HISTORY"
-        logger.info("REAL_ORDER_CALLBACK source=%s key=%s %s", source, key, msg)
+        trading_logger.info("REAL_ORDER_CALLBACK source=%s key=%s %s", source, key, msg)
+
+        if self.listener.has_caughtup and o.status == 2 and key in self.cancel_requested and key not in self.cancel_succeeded:
+            self.cancel_succeeded.add(key)
+            self.monitor_counts["cancel_success_count"] += 1
+            self._monitor_snapshot("CANCEL_SUCCESS")
+
+        if o.errno != 0:
+            exchange = getattr(o, "exchange", "")
+            error_logger.error(
+                "COUNTER_ERROR category=ORDER exchange=%s error=%s message=%s key=%s",
+                exchange,
+                o.errno,
+                get_error_msg(o.errno, error_source(exchange)),
+                key,
+            )
 
         if self.auto_cancel and key in self.owned_orders and o.status == 1 and key not in self.cancel_requested:
             self.cancel_requested.add(key)
-            logger.warning("真实订单已报，按 --auto-cancel 明确指令触发撤单 key=%s", key)
+            trading_logger.warning("真实订单已报，按 --auto-cancel 明确指令触发撤单 key=%s", key)
             self.cancel_order(o)
 
     def _on_trade(self, t):
         self.trades.append(t)
         direction = f"{'买' if t.action==0 else '卖'}{'开' if t.open_close==0 else '平'}"
-        logger.info(f"REAL_TRADE_CALLBACK 成交 {t.instrument} {direction} 价:{t.price} 量:{t.volume} "
-                    f"手续费:{t.commission:.2f} 时间:{t.time}")
+        trading_logger.info(f"REAL_TRADE_CALLBACK 成交 {t.instrument} {direction} 价:{t.price} 量:{t.volume} "
+                            f"手续费:{t.commission:.2f} 时间:{t.time}")
 
     def get_order(self, account, order_group, order_ref):
         return self.orders.get((account, order_group, order_ref))
@@ -360,7 +591,25 @@ class Trader:
 
     def stop(self):
         self._running = False
-        logger.info("交易系统停止")
+        runtime_logger.info("交易系统停止")
+
+def set_local_trading_pause(paused):
+    if paused:
+        PAUSE_FILE.write_text(
+            json.dumps({"paused_at": time.strftime("%Y-%m-%d %H:%M:%S")}, ensure_ascii=False),
+            encoding="utf-8",
+        )
+        monitor_logger.warning("TRADE_CONTROL state=PAUSED method=LOCAL_STRATEGY_FILE file=%s", PAUSE_FILE)
+    else:
+        if PAUSE_FILE.exists():
+            PAUSE_FILE.unlink()
+        monitor_logger.warning("TRADE_CONTROL state=RUNNING method=LOCAL_STRATEGY_FILE file=%s", PAUSE_FILE)
+
+def non_negative_int(value):
+    number = int(value)
+    if number < 0:
+        raise argparse.ArgumentTypeError("必须是大于等于 0 的整数")
+    return number
 
 # ---------- 测试入口 ----------
 def parse_args():
@@ -374,6 +623,10 @@ def parse_args():
     mode = parser.add_mutually_exclusive_group()
     mode.add_argument("--check-only", action="store_true", help="调用 checked=2，只校验而不报至交易所")
     mode.add_argument("--send", action="store_true", help="调用真实 insert_order，可能产生真实委托")
+    mode.add_argument("--batch-cancel", action="store_true", help="批量撤销真实 API 返回的当前账号未完成订单")
+    mode.add_argument("--set-trading-right", type=int, choices=(0, 1, 2), help="0允许交易，1只可平仓，2禁止交易")
+    mode.add_argument("--pause-trading", action="store_true", help="创建本地暂停标志，阻止后续 --send")
+    mode.add_argument("--resume-trading", action="store_true", help="清除本地暂停标志")
 
     parser.add_argument("--instrument")
     parser.add_argument("--action", type=int, choices=(0, 1))
@@ -384,6 +637,10 @@ def parse_args():
     parser.add_argument("--hedge", type=int, choices=(1, 2, 3))
     parser.add_argument("--confirm-account", default="")
     parser.add_argument("--auto-cancel", action="store_true", help="仅撤销本次程序识别到的已报订单")
+    parser.add_argument("--cancel-limit", type=non_negative_int, default=0, help="批量撤单最多选择数量；0 表示全部未完成订单")
+    parser.add_argument("--trading-right-source", type=int, choices=(1, 3), default=3, help="1用户永久设置，3用户临时设置")
+    parser.add_argument("--order-threshold", type=non_negative_int, default=0, help="当前进程报单笔数预警阈值；0 表示关闭")
+    parser.add_argument("--order-cancel-threshold", type=non_negative_int, default=0, help="当前进程报单+撤单笔数预警阈值；0 表示关闭")
     return parser.parse_args()
 
 def require_manual_order_input(args):
@@ -393,48 +650,79 @@ def require_manual_order_input(args):
         flags = ", ".join("--" + name.replace("_", "-") for name in missing)
         raise ValueError(f"订单参数必须由测试人员明确提供，缺少: {flags}")
 
+def require_confirmed_account(args, config):
+    if args.confirm_account != config["name"]:
+        raise ValueError("--confirm-account 必须与本地账号配置一致")
+
 def main():
     args = parse_args()
-    config = load_json(args.account_config)
-    trader = Trader(config["name"], config["password"], args.api_config)
     try:
-        trader.start(args.startup_timeout)
+        config = load_json(args.account_config)
+        if args.pause_trading:
+            set_local_trading_pause(True)
+            return 0
+        if args.resume_trading:
+            set_local_trading_pause(False)
+            return 0
+        if args.send and PAUSE_FILE.exists():
+            raise RuntimeError(f"策略已暂停，拒绝下达交易指令；请先执行 --resume-trading：{PAUSE_FILE}")
 
-        if args.check_only or args.send:
-            require_manual_order_input(args)
-            params = trader.order_params(
-                instrument=args.instrument,
-                action=args.action,
-                open_close=args.open_close,
-                volume=args.volume,
-                price=args.price,
-                order_type=args.order_type,
-                hedge=args.hedge,
-            )
-            logger.info("TEST_INPUT source=OPERATOR %s", json.dumps(params, ensure_ascii=False))
-            if args.check_only:
-                logger.info("TEST_MODE CHECK_ONLY data_source=YDApi")
-                trader.check_order(**params)
+        trader = Trader(
+            config["name"],
+            config["password"],
+            args.api_config,
+            order_threshold=args.order_threshold,
+            order_cancel_threshold=args.order_cancel_threshold,
+        )
+        try:
+            trader.start(args.startup_timeout)
+
+            if args.check_only or args.send:
+                require_manual_order_input(args)
+                params = trader.order_params(
+                    instrument=args.instrument,
+                    action=args.action,
+                    open_close=args.open_close,
+                    volume=args.volume,
+                    price=args.price,
+                    order_type=args.order_type,
+                    hedge=args.hedge,
+                )
+                trading_logger.info("TEST_INPUT source=OPERATOR %s", json.dumps(params, ensure_ascii=False))
+                if args.check_only:
+                    runtime_logger.info("TEST_MODE CHECK_ONLY data_source=YDApi")
+                    trader.check_order(**params)
+                else:
+                    require_confirmed_account(args, config)
+                    runtime_logger.warning("TEST_MODE REAL_ORDER data_source=YDApi auto_cancel=%s", args.auto_cancel)
+                    trader.send_order(auto_cancel=args.auto_cancel, **params)
+            elif args.batch_cancel:
+                require_confirmed_account(args, config)
+                runtime_logger.warning("TEST_MODE REAL_BATCH_CANCEL data_source=YDApi limit=%s", args.cancel_limit)
+                trader.batch_cancel_pending(args.cancel_limit)
+            elif args.set_trading_right is not None:
+                require_confirmed_account(args, config)
+                runtime_logger.warning("TEST_MODE SET_TRADING_RIGHT data_source=YDApi")
+                trader.set_account_trading_right(args.set_trading_right, args.trading_right_source)
+            elif args.instrument:
+                runtime_logger.info("TEST_MODE INSPECT_INSTRUMENT data_source=YDApi")
+                trader.get_real_instrument_data(args.instrument)
             else:
-                if args.confirm_account != config["name"]:
-                    raise ValueError("--confirm-account 必须与本地账号配置一致")
-                logger.warning("TEST_MODE REAL_ORDER data_source=YDApi auto_cancel=%s", args.auto_cancel)
-                trader.send_order(auto_cancel=args.auto_cancel, **params)
-        elif args.instrument:
-            logger.info("TEST_MODE INSPECT_INSTRUMENT data_source=YDApi")
-            trader.get_real_instrument_data(args.instrument)
-        else:
-            logger.info("TEST_MODE CONNECT_ONLY：仅登录并接收真实 API 数据，不报单")
+                runtime_logger.info("TEST_MODE CONNECT_ONLY：仅登录并接收真实 API 数据，不报单")
 
-        if args.wait_seconds > 0:
-            time.sleep(args.wait_seconds)
-        else:
-            while True:
-                time.sleep(1)
-    except KeyboardInterrupt:
-        logger.info("收到 Ctrl+C，结束人工测试")
-    finally:
-        trader.stop()
+            if args.wait_seconds > 0:
+                time.sleep(args.wait_seconds)
+            else:
+                while True:
+                    time.sleep(1)
+        except KeyboardInterrupt:
+            runtime_logger.info("收到 Ctrl+C，结束人工测试")
+        finally:
+            trader.stop()
+        return 0
+    except Exception as exc:
+        error_logger.exception("TEST_FAILED type=%s message=%s", type(exc).__name__, exc)
+        return 1
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())
