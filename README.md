@@ -826,50 +826,72 @@ COUNTER_ERROR
 
 ### 16.5 章节 2.9：暂停下达交易指令
 
-方式一为本地策略暂停，不连接柜台即可设置：
+2.9 按两个真实控制层级执行：第一层通过易达官方 `set_trading_right` 临时禁止交易，第二层再启用本地脚本暂停。执行前读取账号：
 
 ```powershell
-.\.venv\Scripts\python.exe scripts\order.py --pause-trading
+$testAccount = (Get-Content .\config\account.json -Raw | ConvertFrom-Json).name
 ```
 
-暂停后执行任何 `--send`，程序必须返回退出码 1，并记录：
+负责人确认后启用双层暂停：
 
 ```powershell
-# 不填写订单参数即可验证本地暂停；程序会在连接柜台和构造订单之前阻止发送。
+.\.venv\Scripts\python.exe scripts\order.py --pause-two-layer `
+  --confirm-account $testAccount `
+  --trading-right-source 3 `
+  --control-response-timeout 10 `
+  --wait-seconds 1
+```
+
+脚本先调用官方 `set_trading_right(..., trading_right=2, trading_right_source=3)`。只有同步返回 `True`，并收到同一 `request_id` 的真实 `API_RESPONSE error=0` 后，才会创建本地暂停标志。真实成功日志顺序应为：
+
+```text
+TRADING_RIGHT_REQUEST layer=YD_API ... trading_right=2 ... request_id=<实际编号>
+TRADING_RIGHT_RETURN layer=YD_API ... result=True
+API_RESPONSE error=0 ... request_id=<同一实际编号>
+TRADING_RIGHT_CONFIRMED layer=YD_API trading_right=2 ... error=0
+TRADE_CONTROL state=PAUSED layer=LOCAL_SCRIPT
+TWO_LAYER_CONTROL state=PAUSED yd_api=CONFIRMED local_script=PAUSED
+```
+
+随后验证第二层脚本拒单；不填写订单参数即可，因为程序会在连接柜台和构造订单之前阻止发送：
+
+```powershell
 .\.venv\Scripts\python.exe scripts\order.py --send
 ```
 
+真实日志必须出现：
+
 ```text
-TRADE_BLOCKED control=LOCAL_STRATEGY_PAUSE
+TRADE_BLOCKED control=LOCAL_STRATEGY_PAUSE layer=LOCAL_SCRIPT
 ```
 
-完整截图顺序应为：先执行 `--pause-trading`，再执行 `--send` 并截取上述 `TRADE_BLOCKED`，最后执行 `--resume-trading`。本地暂停测试不产生真实委托。
-
-恢复策略：
+测试完成后恢复两层权限：
 
 ```powershell
-.\.venv\Scripts\python.exe scripts\order.py --resume-trading
+.\.venv\Scripts\python.exe scripts\order.py --resume-two-layer `
+  --trading-right-source 3 `
+  --confirm-account $testAccount `
+  --control-response-timeout 10 `
+  --wait-seconds 1
 ```
 
-方式二使用官方账户交易权限接口。只有负责人确认测试账号允许修改交易权限时才能执行：
+恢复时也必须先看到易达 `trading_right=0` 的同请求号 `API_RESPONSE error=0` 和 `TRADING_RIGHT_CONFIRMED`，之后才会清除本地暂停标志，并记录：
+
+```text
+TRADE_CONTROL state=RUNNING layer=LOCAL_SCRIPT
+TWO_LAYER_CONTROL state=RUNNING yd_api=CONFIRMED local_script=RUNNING
+```
+
+可从汇总日志筛选出报告截图：
 
 ```powershell
-# 临时禁止交易
-.\.venv\Scripts\python.exe scripts\order.py --set-trading-right 2 `
-  --trading-right-source 3 `
-  --confirm-account $testAccount `
-  --wait-seconds 5
-
-# 测试结束后恢复允许交易
-.\.venv\Scripts\python.exe scripts\order.py --set-trading-right 0 `
-  --trading-right-source 3 `
-  --confirm-account $testAccount `
-  --wait-seconds 5
+Select-String -Path .\logs\trader.log `
+  -Pattern 'TRADING_RIGHT_|API_RESPONSE|TRADE_CONTROL|TRADE_BLOCKED|TWO_LAYER_CONTROL'
 ```
 
-数值含义：`0` 允许交易，`1` 只可平仓，`2` 禁止交易；`source=3` 表示用户临时设置。最终结果必须查看 `TRADING_RIGHT_RETURN` 和后续 `API_RESPONSE`，返回请求成功不等于柜台已经接受权限变更。
+真实性判定：`TRADING_RIGHT_RETURN result=True` 只表示请求已发出，不能单独证明易达禁止交易；没有匹配的真实 `API_RESPONSE error=0` 和 `TRADING_RIGHT_CONFIRMED` 时，易达层不得填写为通过。若柜台不提供该权限、账号无权修改或响应超时，脚本明确失败，也不会创建本地暂停成功证据。
 
-Python API 没有提供可确认的强制登出接口，因此本脚本不伪造“强制账号退出”测试。报告通过要求是上述方式中的一种或多种，本脚本实现了本地暂停和交易权限设置两种。
+Python API 没有提供可确认的强制登出接口，因此本脚本不伪造“强制账号退出”测试。
 
 ### 16.6 章节 2.10：部分和全部批量撤单
 

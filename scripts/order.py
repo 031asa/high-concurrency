@@ -5,6 +5,7 @@ import logging
 import time
 import json
 import csv
+import threading
 from decimal import Decimal
 from pathlib import Path
 
@@ -126,6 +127,7 @@ class Listener:
         self.on_order = None
         self.on_trade = None
         self.on_caughtup = None
+        self.on_response = None
 
     def login(self, error, maxorderref, ismonitor):
         self.login_error = error
@@ -182,6 +184,8 @@ class Listener:
             request_type,
             request_id,
         )
+        if self.on_response:
+            self.on_response(errorno, request_type, request_id)
 
     def trading_segment(self, exchange, segment_time):
         runtime_logger.info("TRADING_SEGMENT exchange=%s time=%s", exchange, segment_time)
@@ -228,6 +232,7 @@ class Trader:
         self.listener.on_order = self._on_order
         self.listener.on_trade = self._on_trade
         self.listener.on_caughtup = self._on_caughtup
+        self.listener.on_response = self._on_response
 
         # 2. 再创建 API 实例（传入已绑好回调的监听器）
         self.api = YDApi(self.listener, account, password, ini_path)
@@ -251,6 +256,8 @@ class Trader:
             "order_cancel_count": order_cancel_threshold,
         }
         self.threshold_alerted = set()
+        self.response_events = {}
+        self.response_results = {}
         self._running = False
         monitor_logger.info(
             "MONITOR_CONFIG order_threshold=%s order_cancel_threshold=%s duplicate_monitoring=DISABLED",
@@ -433,7 +440,10 @@ class Trader:
     def send_order(self, auto_cancel=False, **params):
         if PAUSE_FILE.exists():
             message = f"策略已暂停，拒绝下达交易指令；恢复文件: {PAUSE_FILE}"
-            error_logger.error("TRADE_BLOCKED control=LOCAL_STRATEGY_PAUSE message=%s", message)
+            error_logger.error(
+                "TRADE_BLOCKED control=LOCAL_STRATEGY_PAUSE layer=LOCAL_SCRIPT message=%s",
+                message,
+            )
             raise RuntimeError(message)
         order_ref = self.api.next_order_ref()
         send_params = dict(params, order_ref=order_ref)
@@ -527,20 +537,53 @@ class Trader:
             results.append(result)
         return results
 
-    def set_account_trading_right(self, trading_right, source=3):
+    def set_account_trading_right(self, trading_right, source=3, response_timeout=0):
+        request_id = int(time.time() * 1000) & 0x7FFFFFFF
+        response_event = threading.Event()
+        if response_timeout > 0:
+            self.response_events[request_id] = response_event
         monitor_logger.warning(
-            "TRADING_RIGHT_REQUEST account=%s trading_right=%s source=%s",
+            "TRADING_RIGHT_REQUEST layer=YD_API account=%s trading_right=%s source=%s request_id=%s",
             mask_account(self.account),
             trading_right,
             source,
+            request_id,
         )
         result = self.api.set_trading_right(
             account=self.account,
             trading_right=trading_right,
-            request_id=int(time.time()),
+            request_id=request_id,
             trading_right_source=source,
         )
-        monitor_logger.warning("TRADING_RIGHT_RETURN result=%s", result)
+        monitor_logger.warning(
+            "TRADING_RIGHT_RETURN layer=YD_API trading_right=%s request_id=%s result=%s",
+            trading_right,
+            request_id,
+            result,
+        )
+        if result is not True:
+            self.response_events.pop(request_id, None)
+            raise RuntimeError("易达 set_trading_right 未接受请求，不能判定交易权限已变更")
+        if response_timeout > 0:
+            if not response_event.wait(response_timeout):
+                self.response_events.pop(request_id, None)
+                raise TimeoutError(
+                    f"等待易达交易权限 API_RESPONSE 超时: request_id={request_id}, timeout={response_timeout} 秒"
+                )
+            errorno, request_type = self.response_results.pop(request_id)
+            self.response_events.pop(request_id, None)
+            if errorno != 0:
+                raise RuntimeError(
+                    f"易达交易权限变更失败: error={errorno}, message={get_error_msg(errorno)}, "
+                    f"request_type={request_type}, request_id={request_id}"
+                )
+            monitor_logger.warning(
+                "TRADING_RIGHT_CONFIRMED layer=YD_API trading_right=%s request_id=%s "
+                "request_type=%s error=0",
+                trading_right,
+                request_id,
+                request_type,
+            )
         return result
 
     # ---------- 内部回调处理 ----------
@@ -549,6 +592,13 @@ class Trader:
             runtime_logger.info(f"登录成功，max_order_ref={maxorderref}, is_admin={ismonitor}")
         else:
             error_logger.error(f"登录失败: {get_error_msg(error)}")
+
+    def _on_response(self, errorno, request_type, request_id):
+        event = self.response_events.get(request_id)
+        if event is None:
+            return
+        self.response_results[request_id] = (errorno, request_type)
+        event.set()
 
     def _on_caughtup(self):
         runtime_logger.info("历史数据同步完成")
@@ -618,11 +668,17 @@ def set_local_trading_pause(paused):
             json.dumps({"paused_at": time.strftime("%Y-%m-%d %H:%M:%S")}, ensure_ascii=False),
             encoding="utf-8",
         )
-        monitor_logger.warning("TRADE_CONTROL state=PAUSED method=LOCAL_STRATEGY_FILE file=%s", PAUSE_FILE)
+        monitor_logger.warning(
+            "TRADE_CONTROL state=PAUSED layer=LOCAL_SCRIPT method=LOCAL_STRATEGY_FILE file=%s",
+            PAUSE_FILE,
+        )
     else:
         if PAUSE_FILE.exists():
             PAUSE_FILE.unlink()
-        monitor_logger.warning("TRADE_CONTROL state=RUNNING method=LOCAL_STRATEGY_FILE file=%s", PAUSE_FILE)
+        monitor_logger.warning(
+            "TRADE_CONTROL state=RUNNING layer=LOCAL_SCRIPT method=LOCAL_STRATEGY_FILE file=%s",
+            PAUSE_FILE,
+        )
 
 def non_negative_int(value):
     number = int(value)
@@ -647,6 +703,8 @@ def parse_args():
     mode.add_argument("--set-trading-right", type=int, choices=(0, 1, 2), help="0允许交易，1只可平仓，2禁止交易")
     mode.add_argument("--pause-trading", action="store_true", help="创建本地暂停标志，阻止后续 --send")
     mode.add_argument("--resume-trading", action="store_true", help="清除本地暂停标志")
+    mode.add_argument("--pause-two-layer", action="store_true", help="先经易达临时禁止交易，再启用本地脚本暂停")
+    mode.add_argument("--resume-two-layer", action="store_true", help="先经易达恢复交易，再清除本地脚本暂停")
     mode.add_argument("--show-monitor-config", action="store_true", help="显示 2.4/2.6 监测阈值配置，不连接柜台")
 
     parser.add_argument("--instrument")
@@ -660,6 +718,7 @@ def parse_args():
     parser.add_argument("--auto-cancel", action="store_true", help="仅撤销本次程序识别到的已报订单")
     parser.add_argument("--cancel-limit", type=non_negative_int, default=0, help="批量撤单最多选择数量；0 表示全部未完成订单")
     parser.add_argument("--trading-right-source", type=int, choices=(1, 3), default=3, help="1用户永久设置，3用户临时设置")
+    parser.add_argument("--control-response-timeout", type=non_negative_int, default=10, help="等待易达交易权限 API_RESPONSE 的秒数")
     parser.add_argument("--order-threshold", type=non_negative_int, default=non_negative_int(monitor_config.get("order_threshold", 0)), help="当前进程报单笔数预警阈值；默认读取 config/monitor.json")
     parser.add_argument("--order-cancel-threshold", type=non_negative_int, default=non_negative_int(monitor_config.get("order_cancel_threshold", 0)), help="当前进程报单+撤单笔数预警阈值；默认读取 config/monitor.json")
     return parser.parse_args()
@@ -697,10 +756,15 @@ def main():
             return 0
         if args.send and PAUSE_FILE.exists():
             message = f"策略已暂停，拒绝下达交易指令；请先执行 --resume-trading：{PAUSE_FILE}"
-            error_logger.error("TRADE_BLOCKED control=LOCAL_STRATEGY_PAUSE message=%s", message)
+            error_logger.error(
+                "TRADE_BLOCKED control=LOCAL_STRATEGY_PAUSE layer=LOCAL_SCRIPT message=%s",
+                message,
+            )
             raise RuntimeError(message)
 
         config = load_json(args.account_config)
+        if (args.pause_two_layer or args.resume_two_layer) and args.control_response_timeout == 0:
+            raise ValueError("双层交易控制必须等待真实 API_RESPONSE，--control-response-timeout 不能为 0")
 
         trader = Trader(
             config["name"],
@@ -712,7 +776,31 @@ def main():
         try:
             trader.start(args.startup_timeout)
 
-            if args.check_only or args.send:
+            if args.pause_two_layer:
+                require_confirmed_account(args, config)
+                runtime_logger.warning("TEST_MODE TWO_LAYER_PAUSE data_source=YDApi")
+                trader.set_account_trading_right(
+                    2,
+                    args.trading_right_source,
+                    args.control_response_timeout,
+                )
+                set_local_trading_pause(True)
+                monitor_logger.warning(
+                    "TWO_LAYER_CONTROL state=PAUSED yd_api=CONFIRMED local_script=PAUSED"
+                )
+            elif args.resume_two_layer:
+                require_confirmed_account(args, config)
+                runtime_logger.warning("TEST_MODE TWO_LAYER_RESUME data_source=YDApi")
+                trader.set_account_trading_right(
+                    0,
+                    args.trading_right_source,
+                    args.control_response_timeout,
+                )
+                set_local_trading_pause(False)
+                monitor_logger.warning(
+                    "TWO_LAYER_CONTROL state=RUNNING yd_api=CONFIRMED local_script=RUNNING"
+                )
+            elif args.check_only or args.send:
                 require_manual_order_input(args)
                 params = trader.order_params(
                     instrument=args.instrument,
@@ -738,7 +826,11 @@ def main():
             elif args.set_trading_right is not None:
                 require_confirmed_account(args, config)
                 runtime_logger.warning("TEST_MODE SET_TRADING_RIGHT data_source=YDApi")
-                trader.set_account_trading_right(args.set_trading_right, args.trading_right_source)
+                trader.set_account_trading_right(
+                    args.set_trading_right,
+                    args.trading_right_source,
+                    args.control_response_timeout,
+                )
             elif args.instrument:
                 runtime_logger.info("TEST_MODE INSPECT_INSTRUMENT data_source=YDApi")
                 trader.get_real_instrument_data(args.instrument)
