@@ -24,6 +24,7 @@
 - `CONNECT_ONLY` 只登录，不报单，可以优先执行。
 - `--check-only` 使用 `checked=2`，只检查，不发送订单到交易所。
 - `--send` 会调用真实 `insert_order`，可能产生真实委托、成交、资金和持仓变化。
+- 每次真实 `--send` 必须提供脚本侧 `--strategy-id`；该字段只用于策略执行权限，不传入易达 API。
 - `--auto-cancel` 只能与 `--send` 配合使用，会在识别到本次订单已报后发送真实撤单请求。
 - 没有负责人确认时，禁止执行带 `--send` 的命令。
 - 禁止把账号、密码、服务器地址、AppID、AuthCode 发到群聊或提交到 Git。
@@ -284,6 +285,7 @@ YDApi.get_instrument 未找到合约
 | 参数 | 允许值 | 含义 |
 |---|---:|---|
 | `--instrument` | 实际合约代码 | 必须来自仿真客户端或测试清单 |
+| `--strategy-id` | 字母、数字、`_`、`.`、`-` | 脚本侧策略身份；正式 `--send` 必填 |
 | `--action` | `0` / `1` | `0` 买，`1` 卖 |
 | `--open-close` | `0` / `1` / `3` / `4` | 开仓、平仓、平今、平昨 |
 | `--volume` | 正整数 | 委托数量 |
@@ -353,6 +355,7 @@ REAL_ORDER_CHECK_RETURN
 ```powershell
 .\.venv\Scripts\python.exe scripts\order.py --send `
   --confirm-account <本地测试账号> `
+  --strategy-id <已确认策略ID> `
   --instrument <已确认合约> `
   --action <已确认方向> `
   --open-close <已确认开平> `
@@ -362,7 +365,9 @@ REAL_ORDER_CHECK_RETURN
   --hedge <已确认投保类型>
 ```
 
-`--confirm-account` 必须与本机 `config/account.json` 中的账号完全一致，否则程序拒绝报单。
+`--confirm-account` 必须与本机 `config/account.json` 中的账号完全一致，否则程序拒绝报单。`--strategy-id` 是本程序的策略身份，不是易达原生订单参数；脚本在调用 `YDApi.insert_order` 前检查该 ID 的执行权限。
+
+策略权限保存在本机 `config/strategy_permissions.json`，该运行时文件已被 Git 忽略。脚本使用本次分配的 `order_ref` 将订单和成交回调关联回 `strategy_id`；历史订单或其他进程发出的订单因为易达回调没有该字段，会明确记录为 `strategy_id=UNKNOWN`，不会猜测归属。
 
 发送前日志会出现醒目的：
 
@@ -641,7 +646,7 @@ $env:PYTHONUTF8=1
 | 2.6 | 指标阈值与预警 | 独立监控进程读取配置并执行报单、报单加撤单阈值预警 |
 | 2.7 | 交易指令检查 | 使用真实合约、Tick、最大/最小委托量和涨跌停数据拒绝错误指令 |
 | 2.8 | 柜台错误提示 | 展示订单、撤单和 API response 的真实错误码及错误文本 |
-| 2.9 | 暂停交易指令 | 支持本地策略暂停；支持官方 `set_trading_right` 账户权限设置 |
+| 2.9 | 暂停交易指令 | 易达控制账户交易权限；脚本按 `strategy_id` 控制策略执行权限 |
 | 2.10 | 批量撤单 | 使用真实 `find_orders(pending=True)` 和 `cancel_multi_orders` |
 | 2.11 | 日志记录 | 生成交易、运行、监测、错误四类日志，并保留汇总日志 |
 
@@ -713,8 +718,10 @@ ACCOUNT_MONITOR_READY process=INDEPENDENT scope=ACCOUNT_LIVE
 再打开第二个 PowerShell 窗口，执行已有真实报单及自动撤单命令：
 
 ```powershell
+$testStrategy = "strategy-monitor-01"
 .\.venv\Scripts\python.exe scripts\order.py --send `
   --confirm-account $testAccount `
+  --strategy-id $testStrategy `
   --instrument $testInstrument `
   --action $testAction `
   --open-close $testOpenClose `
@@ -808,6 +815,7 @@ COUNTER_ERROR
 # 合约和价格必须替换为测试当日真实有效值。
 .\.venv\Scripts\python.exe scripts\order.py --send `
   --confirm-account $testAccount `
+  --strategy-id strategy-2-8 `
   --instrument $testInstrument `
   --action 1 `
   --open-close 1 `
@@ -826,10 +834,11 @@ COUNTER_ERROR
 
 ### 16.5 章节 2.9：暂停下达交易指令
 
-2.9 按两个真实控制层级执行：第一层通过易达官方 `set_trading_right` 临时禁止交易，第二层再启用本地脚本暂停。执行前读取账号：
+2.9 按两个真实控制层级执行：第一层通过易达官方 `set_trading_right` 控制整个账户的交易权限；第二层由脚本按 `strategy_id` 控制某个策略的执行权限。易达 API 没有 `strategy_id` 字段，该 ID 只存在于本程序，不能写成易达原生功能。执行前明确账号和策略：
 
 ```powershell
 $testAccount = (Get-Content .\config\account.json -Raw | ConvertFrom-Json).name
+$testStrategy = "strategy-2-9"
 ```
 
 负责人确认后启用双层暂停：
@@ -837,32 +846,34 @@ $testAccount = (Get-Content .\config\account.json -Raw | ConvertFrom-Json).name
 ```powershell
 .\.venv\Scripts\python.exe scripts\order.py --pause-two-layer `
   --confirm-account $testAccount `
+  --strategy-id $testStrategy `
   --trading-right-source 3 `
   --control-response-timeout 10 `
   --wait-seconds 1
 ```
 
-脚本先调用官方 `set_trading_right(..., trading_right=2, trading_right_source=3)`。只有同步返回 `True`，并收到同一 `request_id` 的真实 `API_RESPONSE error=0` 后，才会创建本地暂停标志。真实成功日志顺序应为：
+脚本先调用官方 `set_trading_right(..., trading_right=2, trading_right_source=3)`。只有同步返回 `True`，并收到同一 `request_id` 的真实 `API_RESPONSE error=0` 后，才会暂停指定 `strategy_id` 的执行权限。真实成功日志顺序应为：
 
 ```text
 TRADING_RIGHT_REQUEST layer=YD_API ... trading_right=2 ... request_id=<实际编号>
 TRADING_RIGHT_RETURN layer=YD_API ... result=True
 API_RESPONSE error=0 ... request_id=<同一实际编号>
 TRADING_RIGHT_CONFIRMED layer=YD_API trading_right=2 ... error=0
-TRADE_CONTROL state=PAUSED layer=LOCAL_SCRIPT
-TWO_LAYER_CONTROL state=PAUSED yd_api=CONFIRMED local_script=PAUSED
+STRATEGY_CONTROL state=PAUSED layer=STRATEGY_EXECUTION strategy_id=strategy-2-9
+TWO_LAYER_CONTROL state=PAUSED account_trading=FORBIDDEN strategy_id=strategy-2-9 strategy_execution=PAUSED
 ```
 
 随后验证第二层脚本拒单；不填写订单参数即可，因为程序会在连接柜台和构造订单之前阻止发送：
 
 ```powershell
-.\.venv\Scripts\python.exe scripts\order.py --send
+.\.venv\Scripts\python.exe scripts\order.py --send `
+  --strategy-id $testStrategy
 ```
 
 真实日志必须出现：
 
 ```text
-TRADE_BLOCKED control=LOCAL_STRATEGY_PAUSE layer=LOCAL_SCRIPT
+TRADE_BLOCKED control=STRATEGY_PERMISSION layer=STRATEGY_EXECUTION strategy_id=strategy-2-9
 ```
 
 测试完成后恢复两层权限：
@@ -871,25 +882,26 @@ TRADE_BLOCKED control=LOCAL_STRATEGY_PAUSE layer=LOCAL_SCRIPT
 .\.venv\Scripts\python.exe scripts\order.py --resume-two-layer `
   --trading-right-source 3 `
   --confirm-account $testAccount `
+  --strategy-id $testStrategy `
   --control-response-timeout 10 `
   --wait-seconds 1
 ```
 
-恢复时也必须先看到易达 `trading_right=0` 的同请求号 `API_RESPONSE error=0` 和 `TRADING_RIGHT_CONFIRMED`，之后才会清除本地暂停标志，并记录：
+恢复时也必须先看到易达 `trading_right=0` 的同请求号 `API_RESPONSE error=0` 和 `TRADING_RIGHT_CONFIRMED`，之后才会恢复指定策略的执行权限，并记录：
 
 ```text
-TRADE_CONTROL state=RUNNING layer=LOCAL_SCRIPT
-TWO_LAYER_CONTROL state=RUNNING yd_api=CONFIRMED local_script=RUNNING
+STRATEGY_CONTROL state=RUNNING layer=STRATEGY_EXECUTION strategy_id=strategy-2-9
+TWO_LAYER_CONTROL state=RUNNING account_trading=ALLOWED strategy_id=strategy-2-9 strategy_execution=RUNNING
 ```
 
 可从汇总日志筛选出报告截图：
 
 ```powershell
 Select-String -Path .\logs\trader.log `
-  -Pattern 'TRADING_RIGHT_|API_RESPONSE|TRADE_CONTROL|TRADE_BLOCKED|TWO_LAYER_CONTROL'
+  -Pattern 'TRADING_RIGHT_|API_RESPONSE|STRATEGY_CONTROL|TRADE_BLOCKED|TWO_LAYER_CONTROL'
 ```
 
-真实性判定：`TRADING_RIGHT_RETURN result=True` 只表示请求已发出，不能单独证明易达禁止交易；没有匹配的真实 `API_RESPONSE error=0` 和 `TRADING_RIGHT_CONFIRMED` 时，易达层不得填写为通过。若柜台不提供该权限、账号无权修改或响应超时，脚本明确失败，也不会创建本地暂停成功证据。
+真实性判定：`TRADING_RIGHT_RETURN result=True` 只表示请求已发出，不能单独证明易达禁止账户交易；没有匹配的真实 `API_RESPONSE error=0` 和 `TRADING_RIGHT_CONFIRMED` 时，账户权限层不得填写为通过。策略层必须出现同一 `strategy_id` 的 `STRATEGY_CONTROL` 与 `TRADE_BLOCKED`。若柜台不提供账户权限设置、账号无权修改或响应超时，脚本明确失败，也不会创建策略暂停成功证据。
 
 Python API 没有提供可确认的强制登出接口，因此本脚本不伪造“强制账号退出”测试。
 
@@ -960,6 +972,6 @@ Select-String -Path .\logs\error.log -Pattern 'VALIDATION_REJECT|COUNTER_ERROR|T
 - 2.3 必须看到真实连接、断开、重连回调。
 - 2.4、2.6、2.8、2.10 必须在柜台在线后以真实订单或撤单回报判定。
 - 2.7 必须证明错误参数被拒绝，并且没有 `REAL_ORDER_SEND_REQUEST`。
-- 2.9 本地暂停必须证明 `--send` 被阻止；账户权限方式必须查看异步 `API_RESPONSE`。
+- 2.9 必须同时证明易达账户权限的异步 `API_RESPONSE error=0`，以及同一 `strategy_id` 的策略暂停和 `TRADE_BLOCKED`。
 - 2.11 必须检查五个日志文件包含对应真实事件。
 - 2.5 不在本次实现范围，不得填写为已完成。

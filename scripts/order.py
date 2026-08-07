@@ -6,6 +6,7 @@ import time
 import json
 import csv
 import threading
+import re
 from decimal import Decimal
 from pathlib import Path
 
@@ -21,6 +22,7 @@ LOG_DIR = PROJECT_ROOT / "logs"
 LOG_DIR.mkdir(parents=True, exist_ok=True)
 PAUSE_FILE = PROJECT_ROOT / "config" / "trading.pause"
 MONITOR_CONFIG_FILE = PROJECT_ROOT / "config" / "monitor.json"
+STRATEGY_CONTROL_FILE = PROJECT_ROOT / "config" / "strategy_permissions.json"
 
 # ---------- 日志配置 ----------
 LOG_FORMAT = '%(asctime)s - %(name)s - %(levelname)s - %(message)s'
@@ -243,6 +245,7 @@ class Trader:
 
         self.orders = {}      # (account, order_group, order_ref) -> order
         self.orders_by_local = {}  # 仅供查询，不作为订单身份
+        self.strategy_by_order_ref = {}  # 脚本侧关联；易达订单结构没有 strategy_id
         self.owned_orders = set()
         self.pending_signature = None
         self.auto_cancel = False
@@ -441,7 +444,7 @@ class Trader:
         trading_logger.info("REAL_ORDER_CHECK_RETURN result=%s", result)
         return result
 
-    def send_order(self, auto_cancel=False, **params):
+    def send_order(self, strategy_id, auto_cancel=False, **params):
         if PAUSE_FILE.exists():
             message = f"策略已暂停，拒绝下达交易指令；恢复文件: {PAUSE_FILE}"
             error_logger.error(
@@ -451,6 +454,7 @@ class Trader:
             raise RuntimeError(message)
         order_ref = self.api.next_order_ref()
         send_params = dict(params, order_ref=order_ref)
+        self.strategy_by_order_ref[(0, order_ref)] = strategy_id
         self.pending_signature = (
             params["instrument"], params["action"], params["open_close"],
             params["volume"], float(params["price"]), params["type"], params["hedge"]
@@ -458,13 +462,20 @@ class Trader:
         self.auto_cancel = auto_cancel
         self._record_order_request()
         trading_logger.warning(
-            "REAL_ORDER_SEND_REQUEST checked=0 order_ref=%s %s",
+            "REAL_ORDER_SEND_REQUEST strategy_id=%s checked=0 order_ref=%s %s",
+            strategy_id,
             order_ref,
             json.dumps(params, ensure_ascii=False),
         )
         result = self.api.insert_order(**send_params, checked=0)
-        trading_logger.warning("REAL_ORDER_SEND_RETURN checked=0 order_ref=%s result=%s", order_ref, result)
+        trading_logger.warning(
+            "REAL_ORDER_SEND_RETURN strategy_id=%s checked=0 order_ref=%s result=%s",
+            strategy_id,
+            order_ref,
+            result,
+        )
         if result is not True:
+            self.strategy_by_order_ref.pop((0, order_ref), None)
             message = (
                 "YDApi.insert_order 未接受真实发送请求（checked=0）；"
                 "交易所不会产生订单回报，请检查连接、会话和订单参数"
@@ -625,7 +636,17 @@ class Trader:
         if o.status == 2 and o.cancel_time:
             msg += f" 撤单时间:{o.cancel_time}"
         source = "LIVE" if self.listener.has_caughtup else "HISTORY"
-        trading_logger.info("REAL_ORDER_CALLBACK source=%s key=%s %s", source, key, msg)
+        strategy_id = self.strategy_by_order_ref.get(
+            (int(getattr(o, "order_group", 0)), int(getattr(o, "order_ref", 0))),
+            "UNKNOWN",
+        )
+        trading_logger.info(
+            "REAL_ORDER_CALLBACK source=%s strategy_id=%s key=%s %s",
+            source,
+            strategy_id,
+            key,
+            msg,
+        )
 
         if self.listener.has_caughtup and o.status == 2 and key in self.cancel_requested and key not in self.cancel_succeeded:
             self.cancel_succeeded.add(key)
@@ -650,8 +671,14 @@ class Trader:
     def _on_trade(self, t):
         self.trades.append(t)
         direction = f"{'买' if t.action==0 else '卖'}{'开' if t.open_close==0 else '平'}"
-        trading_logger.info(f"REAL_TRADE_CALLBACK 成交 {t.instrument} {direction} 价:{t.price} 量:{t.volume} "
-                            f"手续费:{t.commission:.2f} 时间:{t.time}")
+        strategy_id = self.strategy_by_order_ref.get(
+            (int(getattr(t, "order_group", 0)), int(getattr(t, "order_ref", 0))),
+            "UNKNOWN",
+        )
+        trading_logger.info(
+            f"REAL_TRADE_CALLBACK strategy_id={strategy_id} 成交 {t.instrument} {direction} "
+            f"价:{t.price} 量:{t.volume} 手续费:{t.commission:.2f} 时间:{t.time}"
+        )
 
     def get_order(self, account, order_group, order_ref):
         return self.orders.get((account, order_group, order_ref))
@@ -684,6 +711,42 @@ def set_local_trading_pause(paused):
             PAUSE_FILE,
         )
 
+def strategy_id_value(value):
+    strategy_id = str(value).strip()
+    if not re.fullmatch(r"[A-Za-z0-9_.-]{1,64}", strategy_id):
+        raise argparse.ArgumentTypeError("strategy_id 只能包含字母、数字、下划线、点和短横线，长度 1-64")
+    return strategy_id
+
+def load_strategy_permissions():
+    if not STRATEGY_CONTROL_FILE.exists():
+        return {"strategies": {}}
+    data = load_json(STRATEGY_CONTROL_FILE)
+    if not isinstance(data.get("strategies"), dict):
+        raise ValueError(f"策略权限配置缺少 strategies 对象: {STRATEGY_CONTROL_FILE}")
+    return data
+
+def set_strategy_execution(strategy_id, enabled):
+    data = load_strategy_permissions()
+    data["strategies"][strategy_id] = {
+        "enabled": bool(enabled),
+        "updated_at": time.strftime("%Y-%m-%d %H:%M:%S"),
+    }
+    temporary = STRATEGY_CONTROL_FILE.with_suffix(".json.tmp")
+    temporary.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+    temporary.replace(STRATEGY_CONTROL_FILE)
+    state = "RUNNING" if enabled else "PAUSED"
+    monitor_logger.warning(
+        "STRATEGY_CONTROL state=%s layer=STRATEGY_EXECUTION strategy_id=%s file=%s",
+        state,
+        strategy_id,
+        STRATEGY_CONTROL_FILE,
+    )
+
+def strategy_execution_allowed(strategy_id):
+    data = load_strategy_permissions()
+    permission = data["strategies"].get(strategy_id)
+    return True if permission is None else bool(permission.get("enabled", False))
+
 def non_negative_int(value):
     number = int(value)
     if number < 0:
@@ -707,11 +770,14 @@ def parse_args():
     mode.add_argument("--set-trading-right", type=int, choices=(0, 1, 2), help="0允许交易，1只可平仓，2禁止交易")
     mode.add_argument("--pause-trading", action="store_true", help="创建本地暂停标志，阻止后续 --send")
     mode.add_argument("--resume-trading", action="store_true", help="清除本地暂停标志")
-    mode.add_argument("--pause-two-layer", action="store_true", help="先经易达临时禁止交易，再启用本地脚本暂停")
-    mode.add_argument("--resume-two-layer", action="store_true", help="先经易达恢复交易，再清除本地脚本暂停")
+    mode.add_argument("--pause-strategy", action="store_true", help="暂停指定 strategy_id 的脚本执行权限")
+    mode.add_argument("--resume-strategy", action="store_true", help="恢复指定 strategy_id 的脚本执行权限")
+    mode.add_argument("--pause-two-layer", action="store_true", help="先经易达禁止账户交易，再暂停指定策略执行")
+    mode.add_argument("--resume-two-layer", action="store_true", help="先经易达恢复账户交易，再恢复指定策略执行")
     mode.add_argument("--show-monitor-config", action="store_true", help="显示 2.4/2.6 监测阈值配置，不连接柜台")
 
     parser.add_argument("--instrument")
+    parser.add_argument("--strategy-id", type=strategy_id_value, help="脚本侧策略身份；真实 --send 必填，不传入易达 API")
     parser.add_argument("--action", type=int, choices=(0, 1))
     parser.add_argument("--open-close", type=int, choices=(0, 1, 3, 4))
     parser.add_argument("--volume", type=int)
@@ -738,6 +804,10 @@ def require_confirmed_account(args, config):
     if args.confirm_account != config["name"]:
         raise ValueError("--confirm-account 必须与本地账号配置一致")
 
+def require_strategy_id(args):
+    if not args.strategy_id:
+        raise ValueError("该操作必须明确提供 --strategy-id")
+
 def main():
     args = parse_args()
     try:
@@ -758,6 +828,16 @@ def main():
         if args.resume_trading:
             set_local_trading_pause(False)
             return 0
+        if args.pause_strategy:
+            require_strategy_id(args)
+            set_strategy_execution(args.strategy_id, False)
+            return 0
+        if args.resume_strategy:
+            require_strategy_id(args)
+            set_strategy_execution(args.strategy_id, True)
+            return 0
+        if args.send:
+            require_strategy_id(args)
         if args.send and PAUSE_FILE.exists():
             message = f"策略已暂停，拒绝下达交易指令；请先执行 --resume-trading：{PAUSE_FILE}"
             error_logger.error(
@@ -765,10 +845,21 @@ def main():
                 message,
             )
             raise RuntimeError(message)
+        if args.send and not strategy_execution_allowed(args.strategy_id):
+            message = f"策略执行权限已暂停，拒绝报单: strategy_id={args.strategy_id}"
+            error_logger.error(
+                "TRADE_BLOCKED control=STRATEGY_PERMISSION layer=STRATEGY_EXECUTION "
+                "strategy_id=%s message=%s",
+                args.strategy_id,
+                message,
+            )
+            raise RuntimeError(message)
 
         config = load_json(args.account_config)
         if (args.pause_two_layer or args.resume_two_layer) and args.control_response_timeout == 0:
             raise ValueError("双层交易控制必须等待真实 API_RESPONSE，--control-response-timeout 不能为 0")
+        if args.pause_two_layer or args.resume_two_layer:
+            require_strategy_id(args)
 
         trader = Trader(
             config["name"],
@@ -788,9 +879,11 @@ def main():
                     args.trading_right_source,
                     args.control_response_timeout,
                 )
-                set_local_trading_pause(True)
+                set_strategy_execution(args.strategy_id, False)
                 monitor_logger.warning(
-                    "TWO_LAYER_CONTROL state=PAUSED yd_api=CONFIRMED local_script=PAUSED"
+                    "TWO_LAYER_CONTROL state=PAUSED account_trading=FORBIDDEN "
+                    "strategy_id=%s strategy_execution=PAUSED",
+                    args.strategy_id,
                 )
             elif args.resume_two_layer:
                 require_confirmed_account(args, config)
@@ -800,9 +893,11 @@ def main():
                     args.trading_right_source,
                     args.control_response_timeout,
                 )
-                set_local_trading_pause(False)
+                set_strategy_execution(args.strategy_id, True)
                 monitor_logger.warning(
-                    "TWO_LAYER_CONTROL state=RUNNING yd_api=CONFIRMED local_script=RUNNING"
+                    "TWO_LAYER_CONTROL state=RUNNING account_trading=ALLOWED "
+                    "strategy_id=%s strategy_execution=RUNNING",
+                    args.strategy_id,
                 )
             elif args.check_only or args.send:
                 require_manual_order_input(args)
@@ -815,14 +910,26 @@ def main():
                     order_type=args.order_type,
                     hedge=args.hedge,
                 )
-                trading_logger.info("TEST_INPUT source=OPERATOR %s", json.dumps(params, ensure_ascii=False))
+                trading_logger.info(
+                    "TEST_INPUT source=OPERATOR strategy_id=%s %s",
+                    args.strategy_id or "N/A",
+                    json.dumps(params, ensure_ascii=False),
+                )
                 if args.check_only:
                     runtime_logger.info("TEST_MODE CHECK_ONLY data_source=YDApi")
                     trader.check_order(**params)
                 else:
                     require_confirmed_account(args, config)
-                    runtime_logger.warning("TEST_MODE REAL_ORDER data_source=YDApi auto_cancel=%s", args.auto_cancel)
-                    trader.send_order(auto_cancel=args.auto_cancel, **params)
+                    runtime_logger.warning(
+                        "TEST_MODE REAL_ORDER data_source=YDApi strategy_id=%s auto_cancel=%s",
+                        args.strategy_id,
+                        args.auto_cancel,
+                    )
+                    trader.send_order(
+                        strategy_id=args.strategy_id,
+                        auto_cancel=args.auto_cancel,
+                        **params,
+                    )
             elif args.batch_cancel:
                 require_confirmed_account(args, config)
                 runtime_logger.warning("TEST_MODE REAL_BATCH_CANCEL data_source=YDApi limit=%s", args.cancel_limit)

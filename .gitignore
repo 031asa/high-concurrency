@@ -1,6 +1,8 @@
 config/account.json
 config/ydClient.ini
 config/trading.pause
+config/strategy_permissions.json
+config/strategy_permissions.json.tmp
 logs/
 __pycache__/
 *.pyc
