@@ -677,12 +677,12 @@ TRADING_SERVER_CONNECTION event=RECONNECTED process=INDEPENDENT source=YDAPI_CAU
 监控进程在调用 `YDApi.start()` 之前立即启动心跳线程，之后每 5 秒输出一条，证明连接监测、报单监测、撤单监测和阈值监测进程仍在运行。即使易达启动或登录阶段等待较久，心跳也不会消失：
 
 ```text
-MONITOR_HEARTBEAT process=INDEPENDENT state=RUNNING api_start_state=READY api_ready=1 connection_monitor=RUNNING connection_state=CONNECTED connection_source=YDAPI_CAUGHTUP+TCP_PROBE transport_reachable=YES transport_failure_count=0 exchange_route_state=DISCONNECTED exchange_route_connected=0 exchange_route_disconnected=3 order_monitor=RUNNING cancel_monitor=RUNNING threshold_monitor=RUNNING order_count=0 cancel_count=0 cancel_success_count=0
+MONITOR_HEARTBEAT process=INDEPENDENT state=RUNNING api_start_state=READY api_ready=1 connection_monitor=RUNNING connection_state=CONNECTED connection_source=YDAPI_CAUGHTUP+TCP_PROBE transport_reachable=YES transport_failure_count=0 order_monitor=RUNNING cancel_monitor=RUNNING threshold_monitor=RUNNING order_count=0 cancel_count=0 cancel_success_count=0
 ```
 
 `state=RUNNING` 只表示独立监控进程仍在运行。`connection_state` 才是2.3的程序到期货公司易达交易服务器会话状态：首次收到官方 `caughtup` 回调后为 `CONNECTED`；连续两次无法建立到 `TradingServerIP:TradingServerPort` 的 TCP 连接后为 `DISCONNECTED`；网络恢复时先显示 `RECOVERING`，只有易达再次触发 `caughtup` 后才判定 `RECONNECTED` 并恢复为 `CONNECTED`。官方 C++ 头文件说明 `caughtup` 会在首次成功登录以及断线重连后各触发一次。
 
-`exchange_route_state` 是易达服务器到 CFFEX、SHFE、GFEX 等交易所席位的状态，不是本程序到期货公司交易系统的连接状态。原 `exchange_conn_info` 日志已明确改名为 `EXCHANGE_ROUTE_MONITOR`；其中 `conn_status=0` 表示该交易所席位断开，`conn_status=1` 表示该席位连接。即使 `exchange_route_state=DISCONNECTED`，只要 `connection_state=CONNECTED`，仍表示本程序已成功连接期货公司易达交易服务器。
+易达服务器到各交易所席位的 `exchange_conn_info` 不属于本项目能够控制的2.3客户端连接范围，独立监控和交易脚本均不再打印或汇总该状态。2.3只验收本程序到期货公司易达交易服务器的连接、断开和重连；交易所席位异常需要由券商或易达服务器管理员处理。
 
 人工测试步骤：
 
@@ -972,7 +972,7 @@ MONITOR_STATS ... cancel_success_count=<实际成功数量>
 Get-ChildItem .\logs\*.log | Select-Object Name, Length, LastWriteTime
 Select-String -Path .\logs\trading.log -Pattern 'REAL_ORDER|REAL_BATCH_CANCEL'
 Select-String -Path .\logs\runtime.log -Pattern 'TEST_MODE|STATE_CHANGE'
-Select-String -Path .\logs\monitor.log -Pattern 'TRADING_SERVER_CONNECTION|EXCHANGE_ROUTE_MONITOR|MONITOR_STATS|MONITOR_ALERT|TRADE_CONTROL'
+Select-String -Path .\logs\monitor.log -Pattern 'TRADING_SERVER_CONNECTION|MONITOR_STATS|MONITOR_ALERT|TRADE_CONTROL'
 Select-String -Path .\logs\error.log -Pattern 'VALIDATION_REJECT|COUNTER_ERROR|TRADE_BLOCKED|TEST_FAILED'
 ```
 

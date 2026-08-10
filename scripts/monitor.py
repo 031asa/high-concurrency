@@ -24,15 +24,6 @@ from order import (
 class MonitorListener(Listener):
     def __init__(self):
         super().__init__()
-        # 兼容旧版 order.py 的 Listener；新版字段缺失时由独立监控自行补齐。
-        if not hasattr(self, "connection_status"):
-            self.connection_status = {}
-        if not hasattr(self, "connection_lock"):
-            self.connection_lock = threading.Lock()
-        if not hasattr(self, "last_connection_event"):
-            self.last_connection_event = "UNKNOWN"
-        if not hasattr(self, "last_connection_event_at"):
-            self.last_connection_event_at = ""
         self.process_name = "INDEPENDENT"
         self.on_failed_cancel_order = None
 
@@ -290,19 +281,6 @@ class AccountOrderMonitor:
         transport_reachable, probe_error = self._probe_server()
         self._record_transport_probe(transport_reachable, probe_error)
 
-        with self.listener.connection_lock:
-            statuses = list(self.listener.connection_status.values())
-            connected_count = sum(status == 1 for status in statuses)
-            disconnected_count = sum(status != 1 for status in statuses)
-            if not statuses:
-                exchange_route_state = "UNKNOWN"
-            elif connected_count and disconnected_count:
-                exchange_route_state = "PARTIAL"
-            elif connected_count:
-                exchange_route_state = "CONNECTED"
-            else:
-                exchange_route_state = "DISCONNECTED"
-
         with self.lock:
             api_start_state = self.api_start_state
             api_session_ready = self.api_session_ready
@@ -321,8 +299,7 @@ class AccountOrderMonitor:
             "MONITOR_HEARTBEAT process=INDEPENDENT state=RUNNING api_start_state=%s api_ready=%s "
             "connection_monitor=RUNNING connection_state=%s "
             "connection_source=YDAPI_CAUGHTUP+TCP_PROBE transport_reachable=%s "
-            "transport_failure_count=%s exchange_route_state=%s "
-            "exchange_route_connected=%s exchange_route_disconnected=%s "
+            "transport_failure_count=%s "
             "order_monitor=RUNNING cancel_monitor=RUNNING "
             "threshold_monitor=RUNNING order_count=%s cancel_count=%s "
             "cancel_success_count=%s last_connection_event=%s last_connection_at=%s "
@@ -332,9 +309,6 @@ class AccountOrderMonitor:
             connection_state,
             "YES" if transport_reachable else "NO",
             transport_failure_count,
-            exchange_route_state,
-            connected_count,
-            disconnected_count,
             order_count,
             cancel_count,
             cancel_success_count,

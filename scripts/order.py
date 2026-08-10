@@ -214,25 +214,6 @@ class Listener:
             self.connection_status[key] = status
             self.last_connection_event = event
             self.last_connection_event_at = time.strftime("%Y-%m-%dT%H:%M:%S%z")
-        monitor_logger.info(
-            "EXCHANGE_CONNECTION exchange=%s conn=%s status=%s process=%s "
-            "order_limit=%s cancel_limit=%s",
-            exchange,
-            conn,
-            status,
-            self.process_name,
-            getattr(info, "order_limit", ""),
-            getattr(info, "cancel_limit", ""),
-        )
-        monitor_logger.warning(
-            "EXCHANGE_ROUTE_MONITOR event=%s process=%s exchange=%s conn=%s previous=%s current=%s",
-            event,
-            self.process_name,
-            exchange,
-            conn,
-            previous,
-            status,
-        )
 
 # ---------- 交易核心类 ----------
 class Trader:
