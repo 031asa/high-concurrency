@@ -153,48 +153,48 @@ class AccountOrderMonitor:
     @staticmethod
     def _display_popup_alert(title, message, current, threshold):
         try:
-            if sys.platform == "win32":
-                flags = 0x00000030 | 0x00010000 | 0x00040000
-                result = ctypes.windll.user32.MessageBoxW(None, message, title, flags)
-                backend = "WINDOWS_MESSAGEBOX"
-            else:
-                if sys.platform.startswith("linux") and not (
-                    os.environ.get("DISPLAY") or os.environ.get("WAYLAND_DISPLAY")
-                ):
-                    monitor_logger.warning(
-                        "MONITOR_POPUP_ALERT process=INDEPENDENT metric=order_count "
-                        "current=%s threshold=%s status=UNAVAILABLE platform=%s "
-                        "reason=NO_GRAPHICAL_SESSION",
-                        current,
-                        threshold,
-                        sys.platform,
-                    )
-                    return
-                popup_commands = (
-                    ("zenity", ["zenity", "--warning", f"--title={title}", f"--text={message}"]),
-                    ("kdialog", ["kdialog", "--sorry", message, "--title", title]),
-                    ("xmessage", ["xmessage", "-center", "-title", title, message]),
+            if sys.platform.startswith("linux") and not (
+                os.environ.get("DISPLAY") or os.environ.get("WAYLAND_DISPLAY")
+            ):
+                monitor_logger.warning(
+                    "MONITOR_POPUP_ALERT process=INDEPENDENT metric=order_count "
+                    "current=%s threshold=%s status=UNAVAILABLE platform=%s "
+                    "reason=NO_GRAPHICAL_SESSION",
+                    current,
+                    threshold,
+                    sys.platform,
                 )
-                command = next((value for name, value in popup_commands if shutil.which(name)), None)
-                if command is not None:
+                return
+            try:
+                result = AccountOrderMonitor._display_tk_popup(title, message)
+                backend = "TKINTER"
+                placement = "BOTTOM_RIGHT"
+            except Exception as tkinter_error:
+                if sys.platform == "win32":
+                    flags = 0x00000030 | 0x00010000 | 0x00040000
+                    result = ctypes.windll.user32.MessageBoxW(None, message, title, flags)
+                    backend = "WINDOWS_MESSAGEBOX"
+                    placement = "SYSTEM_MANAGED"
+                else:
+                    popup_commands = (
+                        ("zenity", ["zenity", "--warning", f"--title={title}", f"--text={message}"]),
+                        ("kdialog", ["kdialog", "--sorry", message, "--title", title]),
+                    )
+                    command = next((value for name, value in popup_commands if shutil.which(name)), None)
+                    if command is None:
+                        raise RuntimeError(
+                            "无法创建 Unicode 桌面弹窗；请安装 Python tkinter、zenity 或 kdialog"
+                        ) from tkinter_error
                     result = subprocess.run(command, check=False).returncode
                     backend = command[0].upper()
-                else:
-                    import tkinter as tk
-                    from tkinter import messagebox
-
-                    root = tk.Tk()
-                    root.withdraw()
-                    root.attributes("-topmost", True)
-                    result = messagebox.showwarning(title, message, parent=root)
-                    root.destroy()
-                    backend = "TKINTER"
+                    placement = "WINDOW_MANAGER"
             monitor_logger.warning(
                 "MONITOR_POPUP_ALERT process=INDEPENDENT metric=order_count "
-                "current=%s threshold=%s status=CLOSED backend=%s result=%s",
+                "current=%s threshold=%s status=CLOSED backend=%s placement=%s result=%s",
                 current,
                 threshold,
                 backend,
+                placement,
                 result,
             )
         except Exception as exc:
@@ -206,6 +206,73 @@ class AccountOrderMonitor:
                 type(exc).__name__,
                 exc,
             )
+
+    @staticmethod
+    def _display_tk_popup(title, message):
+        import tkinter as tk
+        from tkinter import font as tkfont
+
+        root = tk.Tk()
+        try:
+            root.withdraw()
+            root.title(title)
+            root.resizable(False, False)
+            root.attributes("-topmost", True)
+            available_fonts = set(tkfont.families(root))
+            font_family = next(
+                (
+                    name
+                    for name in (
+                        "Noto Sans CJK SC",
+                        "WenQuanYi Micro Hei",
+                        "Microsoft YaHei UI",
+                        "Microsoft YaHei",
+                        "SimHei",
+                    )
+                    if name in available_fonts
+                ),
+                tkfont.nametofont("TkDefaultFont").actual("family"),
+            )
+            root.configure(background="#fff8e1")
+            label = tk.Label(
+                root,
+                text=message,
+                justify=tk.LEFT,
+                anchor="w",
+                wraplength=400,
+                padx=20,
+                pady=18,
+                background="#fff8e1",
+                foreground="#202124",
+                font=(font_family, 11),
+            )
+            label.pack(fill=tk.BOTH, expand=True)
+            button = tk.Button(
+                root,
+                text="确定",
+                command=root.destroy,
+                width=10,
+                font=(font_family, 10),
+            )
+            button.pack(pady=(0, 16))
+            root.update_idletasks()
+            width = max(440, root.winfo_reqwidth())
+            height = max(230, root.winfo_reqheight())
+            x = max(10, root.winfo_screenwidth() - width - 24)
+            y = max(10, root.winfo_screenheight() - height - 72)
+            root.geometry(f"{width}x{height}+{x}+{y}")
+            root.protocol("WM_DELETE_WINDOW", root.destroy)
+            root.deiconify()
+            root.lift()
+            root.focus_force()
+            root.mainloop()
+            return "OK"
+        finally:
+            try:
+                if root.winfo_exists():
+                    root.destroy()
+            except tk.TclError:
+                pass
 
     def _snapshot(self, reason):
         order_cancel_count = self.order_count + self.cancel_count
