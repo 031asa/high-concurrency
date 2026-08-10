@@ -63,7 +63,8 @@ class AccountOrderMonitor:
         self.listener.on_order = self._on_order
         self.listener.on_caughtup = self._on_caughtup
         self.listener.on_failed_cancel_order = self._on_failed_cancel_order
-        self.api = YDApi(self.listener, account, password, str(self.api_config_path))
+        # pyyd 原生模块在含中文的绝对路径下可能创建失败；保持官方示例使用的相对路径。
+        self.api = YDApi(self.listener, account, password, str(ini_path))
 
         self.last_status = {}
         self.counted_live_orders = set()
