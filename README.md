@@ -640,7 +640,7 @@ $env:PYTHONUTF8=1
 
 | 报告章节 | 功能 | 本脚本实现 |
 |---|---|---|
-| 2.3 | 系统连接异常监测 | 使用真实 `exchange_conn_info` 回调识别连接、断开和重连 |
+| 2.3 | 系统连接异常监测 | 首次/再次 `caughtup` 确认会话连接与重连，TCP 探测确认网络断开 |
 | 2.4 | 报撤单笔数监测 | 独立 `monitor.py` 统计当前账号的实时订单和撤单回报 |
 | 2.5 | 重复报单监测 | 按本次任务要求不实现 |
 | 2.6 | 指标阈值与预警 | 独立监控进程读取配置并执行报单、报单加撤单阈值预警 |
@@ -669,28 +669,28 @@ Get-Content .\logs\monitor.log -Wait
 日志事件：
 
 ```text
-CONNECTION_MONITOR event=CONNECTED process=INDEPENDENT
-CONNECTION_MONITOR event=DISCONNECTED process=INDEPENDENT
-CONNECTION_MONITOR event=RECONNECTED process=INDEPENDENT
+TRADING_SERVER_CONNECTION event=CONNECTED process=INDEPENDENT source=YDAPI_CAUGHTUP
+TRADING_SERVER_CONNECTION event=DISCONNECTED process=INDEPENDENT source=TCP_PROBE
+TRADING_SERVER_CONNECTION event=RECONNECTED process=INDEPENDENT source=YDAPI_CAUGHTUP
 ```
 
 监控进程在调用 `YDApi.start()` 之前立即启动心跳线程，之后每 5 秒输出一条，证明连接监测、报单监测、撤单监测和阈值监测进程仍在运行。即使易达启动或登录阶段等待较久，心跳也不会消失：
 
 ```text
-MONITOR_HEARTBEAT process=INDEPENDENT state=RUNNING api_start_state=CALLING api_ready=0 connection_monitor=RUNNING connection_state=UNKNOWN connection_source=YD_LAST_REPORTED reported_connected=0 reported_disconnected=0 order_monitor=RUNNING cancel_monitor=RUNNING threshold_monitor=RUNNING order_count=0 cancel_count=0 cancel_success_count=0
+MONITOR_HEARTBEAT process=INDEPENDENT state=RUNNING api_start_state=READY api_ready=1 connection_monitor=RUNNING connection_state=CONNECTED connection_source=YDAPI_CAUGHTUP+TCP_PROBE transport_reachable=YES transport_failure_count=0 exchange_route_state=DISCONNECTED exchange_route_connected=0 exchange_route_disconnected=3 order_monitor=RUNNING cancel_monitor=RUNNING threshold_monitor=RUNNING order_count=0 cancel_count=0 cancel_success_count=0
 ```
 
-`state=RUNNING` 只表示独立监控进程仍在运行；`api_start_state=CALLING` 表示正在等待易达 `start()` 返回，`READY` 和 `api_ready=1` 表示已经收到 `caughtup`。`connection_state` 是易达最近一次连接回调汇总出的状态：`CONNECTED` 表示已回报的连接均在线，`DISCONNECTED` 表示均断开，`PARTIAL` 表示部分在线、部分断开；尚未收到易达连接回调则显示 `UNKNOWN`。脚本不会自行伪造“已连接”，真实连接、断开和重连的正式证据仍是上面的 `CONNECTION_MONITOR` 回调日志。
+`state=RUNNING` 只表示独立监控进程仍在运行。`connection_state` 才是2.3的程序到期货公司易达交易服务器会话状态：首次收到官方 `caughtup` 回调后为 `CONNECTED`；连续两次无法建立到 `TradingServerIP:TradingServerPort` 的 TCP 连接后为 `DISCONNECTED`；网络恢复时先显示 `RECOVERING`，只有易达再次触发 `caughtup` 后才判定 `RECONNECTED` 并恢复为 `CONNECTED`。官方 C++ 头文件说明 `caughtup` 会在首次成功登录以及断线重连后各触发一次。
 
-`conn_status=0` 表示断开，`conn_status=1` 表示连接，数值来自易达 C++ API 头文件和 Python 回调，不是脚本自定义的连接结果。
+`exchange_route_state` 是易达服务器到 CFFEX、SHFE、GFEX 等交易所席位的状态，不是本程序到期货公司交易系统的连接状态。原 `exchange_conn_info` 日志已明确改名为 `EXCHANGE_ROUTE_MONITOR`；其中 `conn_status=0` 表示该交易所席位断开，`conn_status=1` 表示该席位连接。即使 `exchange_route_state=DISCONNECTED`，只要 `connection_state=CONNECTED`，仍表示本程序已成功连接期货公司易达交易服务器。
 
 人工测试步骤：
 
-1. 柜台正常时启动 `monitor.py`，截图同一连接的 `CONNECTED process=INDEPENDENT`。
-2. 按测试负责人允许的方式断开测试网络或测试柜台连接，截图 `DISCONNECTED`。
-3. 恢复连接，等待同一交易所和连接编号出现 `RECONNECTED`，再截图。
+1. 柜台正常时启动 `monitor.py`，截图 `TRADING_SERVER_CONNECTION event=CONNECTED source=YDAPI_CAUGHTUP`。
+2. 按测试负责人允许的方式断开测试网络，等待连续探测失败后截图 `event=DISCONNECTED source=TCP_PROBE`。
+3. 恢复网络，先等待 `event=TRANSPORT_RESTORED`，再等待易达真实回调产生 `event=RECONNECTED source=YDAPI_CAUGHTUP` 并截图。
 
-三张截图必须包含相同的 `exchange` 和 `conn`。不能通过手工修改日志或构造回调代替真实断开和重连；如果易达没有发出相应 `exchange_conn_info` 回调，该测试不得判定通过。
+不能通过手工修改日志或构造回调代替真实断开和重连。只有 `TRANSPORT_RESTORED` 而没有第二次 `caughtup/RECONNECTED` 时，表示端口已经恢复但易达会话尚未完成重连，该测试不得判定通过。TCP 探测超时和连续失败次数分别由 `config/monitor.json` 的 `connection_probe_timeout`、`connection_failure_threshold` 控制。
 
 ### 16.2 章节 2.4 和 2.6：报撤单统计、阈值和预警
 
@@ -972,7 +972,7 @@ MONITOR_STATS ... cancel_success_count=<实际成功数量>
 Get-ChildItem .\logs\*.log | Select-Object Name, Length, LastWriteTime
 Select-String -Path .\logs\trading.log -Pattern 'REAL_ORDER|REAL_BATCH_CANCEL'
 Select-String -Path .\logs\runtime.log -Pattern 'TEST_MODE|STATE_CHANGE'
-Select-String -Path .\logs\monitor.log -Pattern 'CONNECTION_MONITOR|MONITOR_STATS|MONITOR_ALERT|TRADE_CONTROL'
+Select-String -Path .\logs\monitor.log -Pattern 'TRADING_SERVER_CONNECTION|EXCHANGE_ROUTE_MONITOR|MONITOR_STATS|MONITOR_ALERT|TRADE_CONTROL'
 Select-String -Path .\logs\error.log -Pattern 'VALIDATION_REJECT|COUNTER_ERROR|TRADE_BLOCKED|TEST_FAILED'
 ```
 

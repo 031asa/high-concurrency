@@ -1,8 +1,10 @@
 import argparse
 import json
+import socket
 import sys
 import threading
 import time
+from pathlib import Path
 
 from order import (
     MONITOR_CONFIG_FILE,
@@ -51,14 +53,17 @@ class AccountOrderMonitor:
         order_threshold,
         order_cancel_threshold,
         heartbeat_seconds,
+        connection_probe_timeout,
+        connection_failure_threshold,
     ):
         self.account = account
+        self.api_config_path, self.server_host, self.server_port = load_server_endpoint(ini_path)
         self.listener = MonitorListener()
         self.listener.on_login = self._on_login
         self.listener.on_order = self._on_order
         self.listener.on_caughtup = self._on_caughtup
         self.listener.on_failed_cancel_order = self._on_failed_cancel_order
-        self.api = YDApi(self.listener, account, password, ini_path)
+        self.api = YDApi(self.listener, account, password, str(self.api_config_path))
 
         self.last_status = {}
         self.counted_live_orders = set()
@@ -68,7 +73,16 @@ class AccountOrderMonitor:
         self.cancel_count = 0
         self.cancel_success_count = 0
         self.heartbeat_seconds = heartbeat_seconds
+        self.connection_probe_timeout = connection_probe_timeout
+        self.connection_failure_threshold = connection_failure_threshold
         self.api_start_state = "NOT_STARTED"
+        self.api_session_ready = False
+        self.server_connection_state = "UNKNOWN"
+        self.transport_reachable = None
+        self.transport_failure_count = 0
+        self.caughtup_count = 0
+        self.last_server_connection_event = "UNKNOWN"
+        self.last_server_connection_at = ""
         self.last_order_event_at = ""
         self.last_cancel_event_at = ""
         self.thresholds = {
@@ -83,10 +97,13 @@ class AccountOrderMonitor:
         monitor_logger.info(
             "MONITOR_CONFIG process=INDEPENDENT scope=ACCOUNT_LIVE "
             "order_threshold=%s order_cancel_threshold=%s heartbeat_seconds=%s "
+            "connection_probe_timeout=%s connection_failure_threshold=%s "
             "duplicate_monitoring=DISABLED",
             order_threshold,
             order_cancel_threshold,
             heartbeat_seconds,
+            connection_probe_timeout,
+            connection_failure_threshold,
         )
 
     @staticmethod
@@ -141,7 +158,24 @@ class AccountOrderMonitor:
 
     def _on_caughtup(self):
         with self.lock:
+            previous = self.server_connection_state
+            event = "RECONNECTED" if self.caughtup_count > 0 or previous in {"DISCONNECTED", "RECOVERING"} else "CONNECTED"
+            self.caughtup_count += 1
             self.api_start_state = "READY"
+            self.api_session_ready = True
+            self.server_connection_state = "CONNECTED"
+            self.transport_reachable = True
+            self.transport_failure_count = 0
+            self.last_server_connection_event = event
+            self.last_server_connection_at = time.strftime("%Y-%m-%dT%H:%M:%S%z")
+            caughtup_count = self.caughtup_count
+        monitor_logger.warning(
+            "TRADING_SERVER_CONNECTION event=%s process=INDEPENDENT source=YDAPI_CAUGHTUP "
+            "previous=%s current=CONNECTED caughtup_count=%s",
+            event,
+            previous,
+            caughtup_count,
+        )
         monitor_logger.warning(
             "ACCOUNT_MONITOR_READY process=INDEPENDENT scope=ACCOUNT_LIVE "
             "account=%s historical_orders=%s",
@@ -198,24 +232,84 @@ class AccountOrderMonitor:
             self.last_cancel_event_at = time.strftime("%Y-%m-%dT%H:%M:%S%z")
             self._snapshot("CANCEL_FAILED_CALLBACK")
 
+    def _probe_server(self):
+        try:
+            with socket.create_connection(
+                (self.server_host, self.server_port),
+                timeout=self.connection_probe_timeout,
+            ):
+                return True, "NONE"
+        except OSError as exc:
+            error_code = getattr(exc, "winerror", None) or getattr(exc, "errno", None) or type(exc).__name__
+            return False, str(error_code)
+
+    def _record_transport_probe(self, reachable, error_code):
+        log_event = None
+        with self.lock:
+            self.transport_reachable = reachable
+            if reachable:
+                self.transport_failure_count = 0
+                if self.server_connection_state == "DISCONNECTED":
+                    previous = self.server_connection_state
+                    self.server_connection_state = "RECOVERING"
+                    log_event = ("TRANSPORT_RESTORED", previous, "RECOVERING", 0, error_code)
+            else:
+                self.transport_failure_count += 1
+                if (
+                    self.transport_failure_count >= self.connection_failure_threshold
+                    and self.server_connection_state not in {"DISCONNECTED", "UNKNOWN"}
+                ):
+                    previous = self.server_connection_state
+                    self.server_connection_state = "DISCONNECTED"
+                    self.api_session_ready = False
+                    self.listener.has_caughtup = False
+                    self.last_server_connection_event = "DISCONNECTED"
+                    self.last_server_connection_at = time.strftime("%Y-%m-%dT%H:%M:%S%z")
+                    log_event = (
+                        "DISCONNECTED",
+                        previous,
+                        "DISCONNECTED",
+                        self.transport_failure_count,
+                        error_code,
+                    )
+
+        if log_event:
+            event, previous, current, failures, code = log_event
+            monitor_logger.warning(
+                "TRADING_SERVER_CONNECTION event=%s process=INDEPENDENT source=TCP_PROBE "
+                "previous=%s current=%s consecutive_failures=%s error_code=%s",
+                event,
+                previous,
+                current,
+                failures,
+                code,
+            )
+
     def _heartbeat(self):
+        transport_reachable, probe_error = self._probe_server()
+        self._record_transport_probe(transport_reachable, probe_error)
+
         with self.listener.connection_lock:
             statuses = list(self.listener.connection_status.values())
             connected_count = sum(status == 1 for status in statuses)
             disconnected_count = sum(status != 1 for status in statuses)
             if not statuses:
-                connection_state = "UNKNOWN"
+                exchange_route_state = "UNKNOWN"
             elif connected_count and disconnected_count:
-                connection_state = "PARTIAL"
+                exchange_route_state = "PARTIAL"
             elif connected_count:
-                connection_state = "CONNECTED"
+                exchange_route_state = "CONNECTED"
             else:
-                connection_state = "DISCONNECTED"
-            last_connection_event = self.listener.last_connection_event
-            last_connection_at = self.listener.last_connection_event_at or "NONE"
+                exchange_route_state = "DISCONNECTED"
 
         with self.lock:
             api_start_state = self.api_start_state
+            api_session_ready = self.api_session_ready
+            connection_state = self.server_connection_state
+            transport_reachable = self.transport_reachable
+            transport_failure_count = self.transport_failure_count
+            last_connection_event = self.last_server_connection_event
+            last_connection_at = self.last_server_connection_at or "NONE"
             order_count = self.order_count
             cancel_count = self.cancel_count
             cancel_success_count = self.cancel_success_count
@@ -225,14 +319,19 @@ class AccountOrderMonitor:
         monitor_logger.info(
             "MONITOR_HEARTBEAT process=INDEPENDENT state=RUNNING api_start_state=%s api_ready=%s "
             "connection_monitor=RUNNING connection_state=%s "
-            "connection_source=YD_LAST_REPORTED reported_connected=%s "
-            "reported_disconnected=%s order_monitor=RUNNING cancel_monitor=RUNNING "
+            "connection_source=YDAPI_CAUGHTUP+TCP_PROBE transport_reachable=%s "
+            "transport_failure_count=%s exchange_route_state=%s "
+            "exchange_route_connected=%s exchange_route_disconnected=%s "
+            "order_monitor=RUNNING cancel_monitor=RUNNING "
             "threshold_monitor=RUNNING order_count=%s cancel_count=%s "
             "cancel_success_count=%s last_connection_event=%s last_connection_at=%s "
             "last_order_at=%s last_cancel_at=%s",
             api_start_state,
-            int(self.listener.has_caughtup),
+            int(api_session_ready),
             connection_state,
+            "YES" if transport_reachable else "NO",
+            transport_failure_count,
+            exchange_route_state,
             connected_count,
             disconnected_count,
             order_count,
@@ -268,6 +367,7 @@ class AccountOrderMonitor:
     def start(self, timeout):
         with self.lock:
             self.api_start_state = "CALLING"
+            self.server_connection_state = "CONNECTING"
         self.start_heartbeat()
         try:
             result = self.api.start()
@@ -307,6 +407,42 @@ def positive_int(value):
     return number
 
 
+def positive_float(value):
+    number = float(value)
+    if number <= 0:
+        raise argparse.ArgumentTypeError("必须是大于 0 的数字")
+    return number
+
+
+def load_server_endpoint(ini_path):
+    path = Path(ini_path)
+    if not path.is_absolute():
+        path = PROJECT_ROOT / path
+    path = path.resolve()
+    if not path.exists():
+        raise FileNotFoundError(f"易达配置文件不存在: {path}")
+
+    values = {}
+    for raw_line in path.read_text(encoding="utf-8-sig").splitlines():
+        line = raw_line.strip()
+        if not line or line.startswith(("#", ";")) or "=" not in line:
+            continue
+        key, value = line.split("=", 1)
+        values[key.strip()] = value.strip()
+
+    host = values.get("TradingServerIP", "")
+    port_text = values.get("TradingServerPort", "")
+    if not host or not port_text:
+        raise ValueError("ydClient.ini 缺少 TradingServerIP 或 TradingServerPort")
+    try:
+        port = int(port_text)
+    except ValueError as exc:
+        raise ValueError("TradingServerPort 必须是整数") from exc
+    if not 1 <= port <= 65535:
+        raise ValueError("TradingServerPort 必须在 1 到 65535 之间")
+    return path, host, port
+
+
 def parse_args():
     monitor_config = load_json(MONITOR_CONFIG_FILE) if MONITOR_CONFIG_FILE.exists() else {}
     parser = argparse.ArgumentParser(description="易达独立报撤单监控进程（不发送订单）")
@@ -319,6 +455,18 @@ def parse_args():
         type=positive_int,
         default=positive_int(monitor_config.get("heartbeat_seconds", 5)),
         help="心跳日志间隔秒数；默认读取 config/monitor.json",
+    )
+    parser.add_argument(
+        "--connection-probe-timeout",
+        type=positive_float,
+        default=positive_float(monitor_config.get("connection_probe_timeout", 2)),
+        help="期货公司交易服务器 TCP 探测超时秒数；默认读取 config/monitor.json",
+    )
+    parser.add_argument(
+        "--connection-failure-threshold",
+        type=positive_int,
+        default=positive_int(monitor_config.get("connection_failure_threshold", 2)),
+        help="连续探测失败多少次后判定断开；默认读取 config/monitor.json",
     )
     parser.add_argument(
         "--order-threshold",
@@ -347,6 +495,8 @@ def main():
             args.order_threshold,
             args.order_cancel_threshold,
             args.heartbeat_seconds,
+            args.connection_probe_timeout,
+            args.connection_failure_threshold,
         )
         monitor.start(args.startup_timeout)
         monitor.wait(args.wait_seconds)

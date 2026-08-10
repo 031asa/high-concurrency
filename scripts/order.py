@@ -225,7 +225,7 @@ class Listener:
             getattr(info, "cancel_limit", ""),
         )
         monitor_logger.warning(
-            "CONNECTION_MONITOR event=%s process=%s exchange=%s conn=%s previous=%s current=%s",
+            "EXCHANGE_ROUTE_MONITOR event=%s process=%s exchange=%s conn=%s previous=%s current=%s",
             event,
             self.process_name,
             exchange,
