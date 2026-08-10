@@ -805,6 +805,7 @@ def main():
                 "order_threshold": args.order_threshold,
                 "order_cancel_threshold": args.order_cancel_threshold,
                 "heartbeat_seconds": monitor_config.get("heartbeat_seconds", 5),
+                "popup_alert_enabled": bool(monitor_config.get("popup_alert_enabled", True)),
                 "duplicate_monitoring": "DISABLED",
             }
             monitor_logger.info("MONITOR_CONFIG_EVIDENCE %s", json.dumps(resolved_config, ensure_ascii=False))

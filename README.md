@@ -708,6 +708,7 @@ MONITOR_HEARTBEAT process=INDEPENDENT state=RUNNING api_start_state=READY api_re
   "order_threshold": 1,
   "order_cancel_threshold": 2,
   "heartbeat_seconds": 5,
+  "popup_alert_enabled": true,
   "duplicate_monitoring": "DISABLED"
 }
 ```
@@ -741,7 +742,7 @@ $testStrategy = "strategy-monitor-01"
   --auto-cancel
 ```
 
-上例表示：独立监控收到第 1 笔新订单的真实回报时触发报单阈值预警；再收到该订单的真实已撤回报时，报单与撤单之和达到 2，并触发报撤单阈值预警。
+上例表示：独立监控收到第 1 笔新订单的真实回报时触发报单阈值预警，并在 Windows 桌面弹出“报单总笔数已达到或超过设置阈值”警告框；再收到该订单的真实已撤回报时，报单与撤单之和达到 2，并触发报撤单日志预警。弹窗在后台线程显示，不阻塞易达订单回调；同一轮监控中报单阈值只弹出一次。
 
 重点日志：
 
@@ -749,6 +750,7 @@ $testStrategy = "strategy-monitor-01"
 MONITOR_CONFIG process=INDEPENDENT scope=ACCOUNT_LIVE order_threshold=1 order_cancel_threshold=2
 MONITOR_STATS process=INDEPENDENT scope=ACCOUNT_LIVE reason=ORDER_CALLBACK order_count=1 cancel_count=0 order_cancel_count=1 cancel_success_count=0
 MONITOR_ALERT process=INDEPENDENT scope=ACCOUNT_LIVE metric=order_count current=1 threshold=1
+MONITOR_POPUP_ALERT process=INDEPENDENT metric=order_count current=1 threshold=1 status=REQUESTED
 MONITOR_STATS process=INDEPENDENT scope=ACCOUNT_LIVE reason=CANCEL_CALLBACK order_count=1 cancel_count=1 order_cancel_count=2 cancel_success_count=1
 MONITOR_ALERT process=INDEPENDENT scope=ACCOUNT_LIVE metric=order_cancel_count current=2 threshold=2
 ```
@@ -756,6 +758,7 @@ MONITOR_ALERT process=INDEPENDENT scope=ACCOUNT_LIVE metric=order_cancel_count c
 截图口径必须注意：
 
 - “报单笔数统计”截图应包含 `process=INDEPENDENT reason=ORDER_CALLBACK order_count=1`。
+- “报单阈值警示”截图应同时包含 Windows 弹窗、`MONITOR_ALERT metric=order_count` 和 `MONITOR_POPUP_ALERT status=REQUESTED`；关闭弹窗后会追加 `status=CLOSED`。
 - “撤单笔数统计”截图必须包含 `process=INDEPENDENT reason=CANCEL_CALLBACK cancel_count=1`；只有 `cancel_count=0` 的截图不能证明撤单统计功能。
 - 若委托已立即成交或被柜台拒绝，程序没有可撤订单，此次不能作为撤单测试证据，需换用能够挂单的测试参数重新执行。
 - `cancel_success_count=1` 只有独立监控收到真实“已撤”回报后才成立。撤单失败回报会计入 `cancel_count`，并输出 `reason=CANCEL_FAILED_CALLBACK`，但不会增加 `cancel_success_count`。

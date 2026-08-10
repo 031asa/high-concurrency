@@ -1,4 +1,5 @@
 import argparse
+import ctypes
 import json
 import socket
 import sys
@@ -46,6 +47,7 @@ class AccountOrderMonitor:
         heartbeat_seconds,
         connection_probe_timeout,
         connection_failure_threshold,
+        popup_alert_enabled,
     ):
         self.account = account
         self.api_config_path, self.server_host, self.server_port = load_server_endpoint(ini_path)
@@ -67,6 +69,7 @@ class AccountOrderMonitor:
         self.heartbeat_seconds = heartbeat_seconds
         self.connection_probe_timeout = connection_probe_timeout
         self.connection_failure_threshold = connection_failure_threshold
+        self.popup_alert_enabled = popup_alert_enabled
         self.api_start_state = "NOT_STARTED"
         self.api_session_ready = False
         self.server_connection_state = "UNKNOWN"
@@ -90,12 +93,13 @@ class AccountOrderMonitor:
             "MONITOR_CONFIG process=INDEPENDENT scope=ACCOUNT_LIVE "
             "order_threshold=%s order_cancel_threshold=%s heartbeat_seconds=%s "
             "connection_probe_timeout=%s connection_failure_threshold=%s "
-            "duplicate_monitoring=DISABLED",
+            "popup_alert=%s popup_metric=order_count duplicate_monitoring=DISABLED",
             order_threshold,
             order_cancel_threshold,
             heartbeat_seconds,
             connection_probe_timeout,
             connection_failure_threshold,
+            "ENABLED" if popup_alert_enabled else "DISABLED",
         )
 
     @staticmethod
@@ -116,6 +120,62 @@ class AccountOrderMonitor:
                 metric,
                 current,
                 threshold,
+            )
+            if metric == "order_count" and self.popup_alert_enabled:
+                self._request_popup_alert(current, threshold)
+
+    def _request_popup_alert(self, current, threshold):
+        title = "易达程序化交易监控警示"
+        message = (
+            "报单总笔数已达到或超过设置阈值。\n\n"
+            f"当前报单总笔数：{current}\n"
+            f"设置阈值：{threshold}\n"
+            f"账号：{mask_account(self.account)}\n"
+            f"时间：{time.strftime('%Y-%m-%d %H:%M:%S')}\n\n"
+            "请立即核对交易活动。"
+        )
+        monitor_logger.warning(
+            "MONITOR_POPUP_ALERT process=INDEPENDENT metric=order_count "
+            "current=%s threshold=%s status=REQUESTED",
+            current,
+            threshold,
+        )
+        threading.Thread(
+            target=self._display_popup_alert,
+            args=(title, message, current, threshold),
+            name="yd-monitor-popup-alert",
+            daemon=True,
+        ).start()
+
+    @staticmethod
+    def _display_popup_alert(title, message, current, threshold):
+        if sys.platform != "win32":
+            monitor_logger.warning(
+                "MONITOR_POPUP_ALERT process=INDEPENDENT metric=order_count "
+                "current=%s threshold=%s status=UNAVAILABLE platform=%s",
+                current,
+                threshold,
+                sys.platform,
+            )
+            return
+        try:
+            flags = 0x00000030 | 0x00010000 | 0x00040000
+            result = ctypes.windll.user32.MessageBoxW(None, message, title, flags)
+            monitor_logger.warning(
+                "MONITOR_POPUP_ALERT process=INDEPENDENT metric=order_count "
+                "current=%s threshold=%s status=CLOSED result=%s",
+                current,
+                threshold,
+                result,
+            )
+        except Exception as exc:
+            error_logger.exception(
+                "MONITOR_POPUP_ALERT_FAILED process=INDEPENDENT metric=order_count "
+                "current=%s threshold=%s type=%s message=%s",
+                current,
+                threshold,
+                type(exc).__name__,
+                exc,
             )
 
     def _snapshot(self, reason):
@@ -444,6 +504,11 @@ def parse_args():
         help="连续探测失败多少次后判定断开；默认读取 config/monitor.json",
     )
     parser.add_argument(
+        "--disable-popup-alert",
+        action="store_true",
+        help="临时关闭报单总笔数阈值的 Windows 弹窗警示",
+    )
+    parser.add_argument(
         "--order-threshold",
         type=non_negative_int,
         default=non_negative_int(monitor_config.get("order_threshold", 0)),
@@ -472,6 +537,7 @@ def main():
             args.heartbeat_seconds,
             args.connection_probe_timeout,
             args.connection_failure_threshold,
+            bool(monitor_config.get("popup_alert_enabled", True)) and not args.disable_popup_alert,
         )
         monitor.start(args.startup_timeout)
         monitor.wait(args.wait_seconds)

@@ -3,5 +3,6 @@
   "order_cancel_threshold": 2,
   "heartbeat_seconds": 5,
   "connection_probe_timeout": 2,
-  "connection_failure_threshold": 2
+  "connection_failure_threshold": 2,
+  "popup_alert_enabled": true
 }
