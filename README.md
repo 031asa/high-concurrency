@@ -742,7 +742,7 @@ $testStrategy = "strategy-monitor-01"
   --auto-cancel
 ```
 
-上例表示：独立监控收到第 1 笔新订单的真实回报时触发报单阈值预警，并在图形桌面右下角弹出“报单总笔数已达到或超过设置阈值”警告框；再收到该订单的真实已撤回报时，报单与撤单之和达到 2，并触发报撤单日志预警。弹窗使用 Unicode 字体并在后台线程显示，不阻塞易达订单回调；同一轮监控中报单阈值只弹出一次。程序优先使用 Python `tkinter` 创建右下角弹窗；不可用时，Windows 回退为系统消息框，Linux 回退为 `zenity` 或 `kdialog`。不再使用可能造成中文乱码的 `xmessage`。Linux 必须在具有 `DISPLAY` 或 `WAYLAND_DISPLAY` 的图形桌面会话运行；纯命令行服务器无法显示桌面弹窗，日志会明确输出 `reason=NO_GRAPHICAL_SESSION`。
+上例表示：独立监控收到第 1 笔新订单的真实回报时触发报单阈值预警，并在图形桌面右下角弹出阈值警告框；再收到该订单的真实已撤回报时，报单与撤单之和达到 2，并触发报撤单日志预警。弹窗在后台线程显示，不阻塞易达订单回调；同一轮监控中报单阈值只弹出一次。Windows 和 Linux 共用纯 ASCII 英文标题、正文和 `OK` 按钮，不依赖中文编码或字体。程序优先使用 Python `tkinter` 创建紧凑的右下角弹窗，并在窗口映射后再次设置坐标，避免 Linux 窗口管理器覆盖初始位置。`tkinter` 不可用时，Windows 回退为系统消息框，Linux 回退为 `zenity` 或 `kdialog`；不再使用 `xmessage`。Linux 必须在具有 `DISPLAY` 或 `WAYLAND_DISPLAY` 的图形桌面会话运行；纯命令行服务器无法显示桌面弹窗，日志会明确输出 `reason=NO_GRAPHICAL_SESSION`。
 
 重点日志：
 

@@ -128,14 +128,14 @@ class AccountOrderMonitor:
                 self._request_popup_alert(current, threshold)
 
     def _request_popup_alert(self, current, threshold):
-        title = "易达程序化交易监控警示"
+        title = "YD Trading Monitor Alert"
         message = (
-            "报单总笔数已达到或超过设置阈值。\n\n"
-            f"当前报单总笔数：{current}\n"
-            f"设置阈值：{threshold}\n"
-            f"账号：{mask_account(self.account)}\n"
-            f"时间：{time.strftime('%Y-%m-%d %H:%M:%S')}\n\n"
-            "请立即核对交易活动。"
+            "The total order count has reached or exceeded the configured threshold.\n\n"
+            f"Current order count: {current}\n"
+            f"Configured threshold: {threshold}\n"
+            f"Account: {mask_account(self.account)}\n"
+            f"Time: {time.strftime('%Y-%m-%d %H:%M:%S')}\n\n"
+            "Please verify trading activity immediately."
         )
         monitor_logger.warning(
             "MONITOR_POPUP_ALERT process=INDEPENDENT metric=order_count "
@@ -210,7 +210,6 @@ class AccountOrderMonitor:
     @staticmethod
     def _display_tk_popup(title, message):
         import tkinter as tk
-        from tkinter import font as tkfont
 
         root = tk.Tk()
         try:
@@ -218,51 +217,39 @@ class AccountOrderMonitor:
             root.title(title)
             root.resizable(False, False)
             root.attributes("-topmost", True)
-            available_fonts = set(tkfont.families(root))
-            font_family = next(
-                (
-                    name
-                    for name in (
-                        "Noto Sans CJK SC",
-                        "WenQuanYi Micro Hei",
-                        "Microsoft YaHei UI",
-                        "Microsoft YaHei",
-                        "SimHei",
-                    )
-                    if name in available_fonts
-                ),
-                tkfont.nametofont("TkDefaultFont").actual("family"),
-            )
             root.configure(background="#fff8e1")
             label = tk.Label(
                 root,
                 text=message,
                 justify=tk.LEFT,
                 anchor="w",
-                wraplength=400,
-                padx=20,
-                pady=18,
+                wraplength=320,
+                padx=16,
+                pady=12,
                 background="#fff8e1",
                 foreground="#202124",
-                font=(font_family, 11),
             )
             label.pack(fill=tk.BOTH, expand=True)
             button = tk.Button(
                 root,
-                text="确定",
+                text="OK",
                 command=root.destroy,
-                width=10,
-                font=(font_family, 10),
+                width=8,
             )
-            button.pack(pady=(0, 16))
+            button.pack(pady=(0, 12))
             root.update_idletasks()
-            width = max(440, root.winfo_reqwidth())
-            height = max(230, root.winfo_reqheight())
-            x = max(10, root.winfo_screenwidth() - width - 24)
-            y = max(10, root.winfo_screenheight() - height - 72)
-            root.geometry(f"{width}x{height}+{x}+{y}")
+            screen_width = root.winfo_screenwidth()
+            screen_height = root.winfo_screenheight()
+            width = min(max(360, root.winfo_reqwidth()), max(280, screen_width - 32))
+            height = min(max(190, root.winfo_reqheight()), max(160, screen_height - 64))
+            x = max(8, screen_width - width - 16)
+            y = max(8, screen_height - height - 48)
+            geometry = f"{width}x{height}+{x}+{y}"
+            root.geometry(geometry)
             root.protocol("WM_DELETE_WINDOW", root.destroy)
             root.deiconify()
+            root.update_idletasks()
+            root.geometry(geometry)
             root.lift()
             root.focus_force()
             root.mainloop()
