@@ -1,7 +1,10 @@
 import argparse
 import ctypes
 import json
+import os
+import shutil
 import socket
+import subprocess
 import sys
 import threading
 import time
@@ -149,23 +152,49 @@ class AccountOrderMonitor:
 
     @staticmethod
     def _display_popup_alert(title, message, current, threshold):
-        if sys.platform != "win32":
-            monitor_logger.warning(
-                "MONITOR_POPUP_ALERT process=INDEPENDENT metric=order_count "
-                "current=%s threshold=%s status=UNAVAILABLE platform=%s",
-                current,
-                threshold,
-                sys.platform,
-            )
-            return
         try:
-            flags = 0x00000030 | 0x00010000 | 0x00040000
-            result = ctypes.windll.user32.MessageBoxW(None, message, title, flags)
+            if sys.platform == "win32":
+                flags = 0x00000030 | 0x00010000 | 0x00040000
+                result = ctypes.windll.user32.MessageBoxW(None, message, title, flags)
+                backend = "WINDOWS_MESSAGEBOX"
+            else:
+                if sys.platform.startswith("linux") and not (
+                    os.environ.get("DISPLAY") or os.environ.get("WAYLAND_DISPLAY")
+                ):
+                    monitor_logger.warning(
+                        "MONITOR_POPUP_ALERT process=INDEPENDENT metric=order_count "
+                        "current=%s threshold=%s status=UNAVAILABLE platform=%s "
+                        "reason=NO_GRAPHICAL_SESSION",
+                        current,
+                        threshold,
+                        sys.platform,
+                    )
+                    return
+                popup_commands = (
+                    ("zenity", ["zenity", "--warning", f"--title={title}", f"--text={message}"]),
+                    ("kdialog", ["kdialog", "--sorry", message, "--title", title]),
+                    ("xmessage", ["xmessage", "-center", "-title", title, message]),
+                )
+                command = next((value for name, value in popup_commands if shutil.which(name)), None)
+                if command is not None:
+                    result = subprocess.run(command, check=False).returncode
+                    backend = command[0].upper()
+                else:
+                    import tkinter as tk
+                    from tkinter import messagebox
+
+                    root = tk.Tk()
+                    root.withdraw()
+                    root.attributes("-topmost", True)
+                    result = messagebox.showwarning(title, message, parent=root)
+                    root.destroy()
+                    backend = "TKINTER"
             monitor_logger.warning(
                 "MONITOR_POPUP_ALERT process=INDEPENDENT metric=order_count "
-                "current=%s threshold=%s status=CLOSED result=%s",
+                "current=%s threshold=%s status=CLOSED backend=%s result=%s",
                 current,
                 threshold,
+                backend,
                 result,
             )
         except Exception as exc:
@@ -506,7 +535,7 @@ def parse_args():
     parser.add_argument(
         "--disable-popup-alert",
         action="store_true",
-        help="临时关闭报单总笔数阈值的 Windows 弹窗警示",
+        help="临时关闭报单总笔数阈值的桌面弹窗警示",
     )
     parser.add_argument(
         "--order-threshold",
@@ -525,6 +554,7 @@ def parse_args():
 
 def main():
     args = parse_args()
+    monitor_config = load_json(MONITOR_CONFIG_FILE) if MONITOR_CONFIG_FILE.exists() else {}
     monitor = None
     try:
         config = load_json(args.account_config)
