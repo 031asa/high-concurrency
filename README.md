@@ -1015,7 +1015,7 @@ python3 scripts/marketdata.py \
 
 `--instrument` 必须替换为测试当天确认存在且处于行情时段的真实合约。`--max-quotes 10` 表示收到 10 条后提前结束；设置为 `0` 时始终等待完整的 `--duration-seconds`。程序会自动取消订阅。
 
-官方 Python API 的行情对象提供 `timestamp` 字段；C++ 头文件中的 `string2TimeStamp/timeStamp2String` 证明它是以 17:00 为交易日边界的毫秒计数。脚本在回调入口立即获取本机 UTC+8 时刻，并转换成相同口径后计算：
+现场真实 Python API 回调表明，行情对象的 `timestamp` 字段是 `HH:MM:SS.mmm` 字符串（例如 `13:35:34.900`）。脚本只按这个真实 Python 接口格式处理：先把字符串转换为以 17:00 为交易日边界的毫秒计数，再把回调入口获取的本机 UTC+8 时刻转换成相同口径后计算：
 
 ```text
 difference_ms = local_cycle_timestamp_ms - market_timestamp_ms

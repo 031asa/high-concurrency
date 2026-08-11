@@ -1,5 +1,6 @@
 import argparse
 import logging
+import re
 import sys
 import threading
 import time
@@ -19,6 +20,9 @@ CHINA_STANDARD_TIME = timezone(timedelta(hours=8))
 YD_TRADING_DAY_START_HOUR = 17
 MILLISECONDS_PER_DAY = 24 * 60 * 60 * 1000
 marketdata_logger = logging.getLogger("Trader.MarketData")
+YD_CLOCK_PATTERN = re.compile(
+    r"^(?P<hour>\d{1,2}):(?P<minute>\d{2}):(?P<second>\d{2})(?:\.(?P<fraction>\d{1,9}))?$"
+)
 
 
 def yd_cycle_timestamp_ms(value):
@@ -40,6 +44,28 @@ def format_yd_timestamp(timestamp_ms):
     minutes, remainder = divmod(remainder, 60 * 1000)
     seconds, milliseconds = divmod(remainder, 1000)
     return f"{hours:02d}:{minutes:02d}:{seconds:02d}.{milliseconds:03d}"
+
+
+def parse_yd_timestamp_ms(value):
+    """Normalize the real Python API HH:MM:SS.mmm timestamp to YD milliseconds."""
+    if not isinstance(value, str):
+        raise TypeError(f"Python YDApi timestamp must be a string: {value!r}")
+    match = YD_CLOCK_PATTERN.fullmatch(value.strip())
+    if not match:
+        raise ValueError(f"invalid Python YDApi timestamp: {value!r}")
+    hour = int(match.group("hour"))
+    minute = int(match.group("minute"))
+    second = int(match.group("second"))
+    if hour > 23 or minute > 59 or second > 59:
+        raise ValueError(f"invalid Python YDApi timestamp: {value!r}")
+    fraction = match.group("fraction") or ""
+    milliseconds = int((fraction + "000")[:3])
+    clock_timestamp_ms = (
+        (hour * 60 * 60 + minute * 60 + second) * 1000
+        + milliseconds
+    )
+    start_ms = YD_TRADING_DAY_START_HOUR * 60 * 60 * 1000
+    return (clock_timestamp_ms - start_ms) % MILLISECONDS_PER_DAY
 
 
 def signed_timestamp_difference_ms(local_timestamp_ms, market_timestamp_ms):
@@ -118,9 +144,7 @@ class MarketDataListener:
         instrument = str(getattr(market_data, "instrument", ""))
         raw_timestamp = getattr(market_data, "timestamp", None)
         try:
-            market_timestamp_ms = int(raw_timestamp)
-            if not 0 <= market_timestamp_ms < MILLISECONDS_PER_DAY:
-                raise ValueError("timestamp is outside one YD trading-day cycle")
+            market_timestamp_ms = parse_yd_timestamp_ms(raw_timestamp)
         except (TypeError, ValueError) as exc:
             error_logger.error(
                 "MARKETDATA_TIMESTAMP_UNAVAILABLE sequence=%s instrument=%s "
