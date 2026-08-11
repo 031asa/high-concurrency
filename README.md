@@ -46,6 +46,7 @@ yd_trader_real_api
 ├── logs
 │   └── trader.log               正式运行日志，禁止提交账号敏感信息
 ├── scripts
+│   ├── marketdata.py            真实行情订阅与时间戳差异测试
 │   ├── monitor.py               独立报撤单监控进程，只监听不交易
 │   └── order.py                 人工测试入口
 ├── vendor
@@ -989,3 +990,47 @@ Select-String -Path .\logs\error.log -Pattern 'VALIDATION_REJECT|COUNTER_ERROR|T
 - 2.9 必须同时证明易达账户权限的异步 `API_RESPONSE error=0`，以及同一 `strategy_id` 的策略暂停和 `TRADE_BLOCKED`。
 - 2.11 必须检查五个日志文件包含对应真实事件。
 - 2.5 不在本次实现范围，不得填写为已完成。
+
+## 17. 真实行情时间戳差异测试
+
+`scripts/marketdata.py` 在真实 `YDApi` 登录并收到 `caughtup` 后订阅指定合约。脚本没有模拟行情，也不包含硬编码账号密码；账号与易达连接参数继续读取本机已忽略的 `config/account.json` 和 `config/ydClient.ini`。
+
+PowerShell 示例：
+
+```powershell
+.\.venv\Scripts\python.exe .\scripts\marketdata.py `
+  --instrument IF2609 `
+  --duration-seconds 10 `
+  --max-quotes 10
+```
+
+Linux 示例：
+
+```bash
+python3 scripts/marketdata.py \
+  --instrument IF2609 \
+  --duration-seconds 10 \
+  --max-quotes 10
+```
+
+`--instrument` 必须替换为测试当天确认存在且处于行情时段的真实合约。`--max-quotes 10` 表示收到 10 条后提前结束；设置为 `0` 时始终等待完整的 `--duration-seconds`。程序会自动取消订阅。
+
+官方 Python API 的行情对象提供 `timestamp` 字段；C++ 头文件中的 `string2TimeStamp/timeStamp2String` 证明它是以 17:00 为交易日边界的毫秒计数。脚本在回调入口立即获取本机 UTC+8 时刻，并转换成相同口径后计算：
+
+```text
+difference_ms = local_cycle_timestamp_ms - market_timestamp_ms
+```
+
+跨越 17:00 或午夜时会按 24 小时循环修正。正数 `LOCAL_AFTER_MARKET` 表示本机收到行情的时间晚于行情时间；负数 `LOCAL_BEFORE_MARKET` 通常表示本机与行情源时钟存在偏差；零表示落在同一毫秒。每条真实行情都会写入 `logs/trader.log`：
+
+```text
+MARKETDATA_TIMESTAMP ... market_timestamp_ms=59400100 market_time=09:30:00.100 local_receive_time=... local_cycle_timestamp_ms=59400135 has_difference=YES difference_ms=+35 absolute_difference_ms=35 direction=LOCAL_AFTER_MARKET
+```
+
+上面仅为字段格式说明，正式结果必须使用现场真实日志，不能把示例数值填入测试报告。结束时应出现真实汇总：
+
+```text
+MARKETDATA_TIMESTAMP_SUMMARY instrument=IF2609 quotes=10 comparable_quotes=10 has_difference=YES min_difference_ms=... average_difference_ms=... max_difference_ms=... max_absolute_difference_ms=... result=SUCCESS
+```
+
+该差值包含交易所/行情源生成、网络传输、易达处理、Python 回调调度以及本机时钟误差，不能单独解释为网络延迟。测试前必须校准本机时间。若只有 `MARKETDATA_TEST_FAILED reason=NO_MARKETDATA_CALLBACK`，应检查当前是否为该合约交易时段，以及 `ydClient.ini` 是否启用了 TCP 行情连接；不能将无回调判定为通过。
