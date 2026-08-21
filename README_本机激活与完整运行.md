@@ -258,8 +258,10 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\windows_time_sync.
 ```powershell
 powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\windows_time_sync.ps1 `
   -ResyncWindows `
-  -WindowsPeers "<经批准的NTP服务器1>,0x9 <经批准的NTP服务器2>,0x9"
+  -WindowsPeers "<经批准的NTP服务器1>,0x8 <经批准的NTP服务器2>,0x8"
 ```
+
+Windows 手工 NTP 服务器后缀建议使用 `0x8`（客户端模式）。`0x9` 还包含特殊固定轮询标志；当 `SpecialPollInterval` 很大时，不适合临时行情延迟测试的快速校时。
 
 行情延迟测试前必须看到 `RESULT: PASS`。如果只有 chrony 显示纳秒级偏差，但 Windows↔WSL 直接时差超标，仍不得把行情统计当作网络延迟。
 

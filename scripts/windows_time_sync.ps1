@@ -87,6 +87,7 @@ function Invoke-W32TimeResync {
     if ($resyncExitCode -ne 0) {
         throw "w32tm resync/rediscover failed with exit code $resyncExitCode."
     }
+    Start-Sleep -Seconds 5
 }
 
 function Invoke-WslText {
@@ -209,6 +210,9 @@ try {
     $failures = New-Object System.Collections.Generic.List[string]
     if ([math]::Abs($windowsNtp.AverageOffsetMs) -gt $MaxWindowsNtpOffsetMs) {
         $failures.Add("Windows/NTP offset exceeds $MaxWindowsNtpOffsetMs ms")
+    }
+    if ($windowsSource -match "Local CMOS Clock|本地\s*CMOS\s*时钟") {
+        $failures.Add("W32Time is using the local CMOS clock instead of the configured NTP peer")
     }
     if ($chrony.LeapStatus -ne "Normal") {
         $failures.Add("chrony leap status is '$($chrony.LeapStatus)', not Normal")
