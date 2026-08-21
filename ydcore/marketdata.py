@@ -212,13 +212,25 @@ class MarketDataListener:
                 instrument,
                 quote_count,
             )
+            print(
+                "\n=== 行情延迟测试汇总 ===\n"
+                f"合约: {instrument}\n"
+                f"收到行情: {quote_count} 条\n"
+                "有效时间戳: 0 条\n"
+                "结果: 失败（没有可比较的行情时间戳）",
+                flush=True,
+            )
             return False
 
+        absolute_differences = [abs(value) for value in differences]
         average_ms = sum(differences) / len(differences)
+        average_absolute_ms = sum(absolute_differences) / len(absolute_differences)
         marketdata_logger.info(
             "MARKETDATA_TIMESTAMP_SUMMARY instrument=%s quotes=%s comparable_quotes=%s "
             "has_difference=%s min_difference_ms=%s average_difference_ms=%.3f "
-            "max_difference_ms=%s max_absolute_difference_ms=%s result=SUCCESS",
+            "max_difference_ms=%s min_absolute_difference_ms=%s "
+            "average_absolute_difference_ms=%.3f max_absolute_difference_ms=%s "
+            "result=SUCCESS",
             instrument,
             quote_count,
             len(differences),
@@ -226,7 +238,21 @@ class MarketDataListener:
             min(differences),
             average_ms,
             max(differences),
-            max(abs(value) for value in differences),
+            min(absolute_differences),
+            average_absolute_ms,
+            max(absolute_differences),
+        )
+        print(
+            "\n=== 行情延迟测试汇总 ===\n"
+            f"合约: {instrument}\n"
+            f"收到行情: {quote_count} 条\n"
+            f"有效时间戳: {len(differences)} 条\n"
+            f"平均延迟（绝对值）: {average_absolute_ms:.3f} ms\n"
+            f"最小延迟（绝对值）: {min(absolute_differences)} ms\n"
+            f"最大延迟（绝对值）: {max(absolute_differences)} ms\n"
+            f"平均时间差（本机减行情）: {average_ms:+.3f} ms\n"
+            "说明: 该结果包含本机与行情源的时钟偏差，不等同于纯网络单向延迟。",
+            flush=True,
         )
         return True
 
