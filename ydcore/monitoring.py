@@ -10,11 +10,11 @@ import threading
 import time
 from pathlib import Path
 
-from order import (
+from .trading import (
     MONITOR_CONFIG_FILE,
     PROJECT_ROOT,
     Listener,
-    YDApi,
+    create_ydapi,
     error_logger,
     get_error_msg,
     load_json,
@@ -60,7 +60,7 @@ class AccountOrderMonitor:
         self.listener.on_caughtup = self._on_caughtup
         self.listener.on_failed_cancel_order = self._on_failed_cancel_order
         # pyyd 原生模块在含中文的绝对路径下可能创建失败；保持官方示例使用的相对路径。
-        self.api = YDApi(self.listener, account, password, str(ini_path))
+        self.api = create_ydapi(self.listener, account, password, str(ini_path))
 
         self.last_status = {}
         self.counted_live_orders = set()
@@ -561,7 +561,7 @@ def load_server_endpoint(ini_path):
     return path, host, port
 
 
-def parse_args():
+def parse_args(argv=None):
     monitor_config = load_json(MONITOR_CONFIG_FILE) if MONITOR_CONFIG_FILE.exists() else {}
     parser = argparse.ArgumentParser(description="易达独立报撤单监控进程（不发送订单）")
     parser.add_argument("--account-config", default=str(PROJECT_ROOT / "config" / "account.json"))
@@ -603,11 +603,11 @@ def parse_args():
         default=non_negative_int(monitor_config.get("order_cancel_threshold", 0)),
         help="账号实时报单加已撤回报阈值；默认读取 config/monitor.json",
     )
-    return parser.parse_args()
+    return parser.parse_args(argv)
 
 
-def main():
-    args = parse_args()
+def run(argv=None):
+    args = parse_args(argv)
     monitor_config = load_json(MONITOR_CONFIG_FILE) if MONITOR_CONFIG_FILE.exists() else {}
     monitor = None
     try:
@@ -641,5 +641,4 @@ def main():
             monitor.stop_heartbeat()
 
 
-if __name__ == "__main__":
-    sys.exit(main())
+main = run

@@ -6,9 +6,9 @@ import threading
 import time
 from datetime import datetime, timedelta, timezone
 
-from order import (
+from .trading import (
     PROJECT_ROOT,
-    YDApi,
+    create_ydapi,
     error_logger,
     get_error_msg,
     load_json,
@@ -235,7 +235,7 @@ class MarketDataProbe:
     def __init__(self, account, password, api_config, max_quotes):
         self.account = account
         self.listener = MarketDataListener(max_quotes)
-        self.api = YDApi(self.listener, account, password, api_config)
+        self.api = create_ydapi(self.listener, account, password, api_config)
         self.subscribed_instrument = None
 
     def start(self, timeout):
@@ -286,7 +286,7 @@ class MarketDataProbe:
         )
 
 
-def parse_args():
+def parse_args(argv=None):
     parser = argparse.ArgumentParser(
         description="Subscribe to real YDApi market data and compare timestamps"
     )
@@ -304,11 +304,11 @@ def parse_args():
         default=10,
         help="stop after this many callbacks; 0 waits for the full duration",
     )
-    return parser.parse_args()
+    return parser.parse_args(argv)
 
 
-def main():
-    args = parse_args()
+def run(argv=None):
+    args = parse_args(argv)
     probe = None
     try:
         account_config = load_json(args.account_config)
@@ -354,5 +354,4 @@ def main():
                 )
 
 
-if __name__ == "__main__":
-    sys.exit(main())
+main = run

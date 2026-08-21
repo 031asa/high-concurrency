@@ -16,7 +16,12 @@ _DLL_DIRECTORY = None
 if os.name == "nt" and VENDOR_DIR.exists():
     _DLL_DIRECTORY = os.add_dll_directory(str(VENDOR_DIR))
 
-from pyyd import *
+
+def create_ydapi(*args, **kwargs):
+    """Load the vendor extension only after authorization has succeeded."""
+    from pyyd import YDApi
+
+    return YDApi(*args, **kwargs)
 
 LOG_DIR = PROJECT_ROOT / "logs"
 LOG_DIR.mkdir(parents=True, exist_ok=True)
@@ -228,7 +233,7 @@ class Trader:
         self.listener.on_response = self._on_response
 
         # 2. 再创建 API 实例（传入已绑好回调的监听器）
-        self.api = YDApi(self.listener, account, password, ini_path)
+        self.api = create_ydapi(self.listener, account, password, ini_path)
 
         self.orders = {}      # (account, order_group, order_ref) -> order
         self.orders_by_local = {}  # 仅供查询，不作为订单身份
@@ -741,7 +746,7 @@ def non_negative_int(value):
     return number
 
 # ---------- 测试入口 ----------
-def parse_args():
+def parse_args(argv=None):
     monitor_config = load_json(MONITOR_CONFIG_FILE) if MONITOR_CONFIG_FILE.exists() else {}
     parser = argparse.ArgumentParser(description="易达真实 Python API 人工测试")
     parser.add_argument("--account-config", default=str(PROJECT_ROOT / "config" / "account.json"))
@@ -778,7 +783,7 @@ def parse_args():
     parser.add_argument("--control-response-timeout", type=non_negative_int, default=10, help="等待易达交易权限 API_RESPONSE 的秒数")
     parser.add_argument("--order-threshold", type=non_negative_int, default=non_negative_int(monitor_config.get("order_threshold", 0)), help="当前进程报单笔数预警阈值；默认读取 config/monitor.json")
     parser.add_argument("--order-cancel-threshold", type=non_negative_int, default=non_negative_int(monitor_config.get("order_cancel_threshold", 0)), help="当前进程报单+撤单笔数预警阈值；默认读取 config/monitor.json")
-    return parser.parse_args()
+    return parser.parse_args(argv)
 
 def require_manual_order_input(args):
     names = ("instrument", "action", "open_close", "volume", "price", "order_type", "hedge")
@@ -795,8 +800,8 @@ def require_strategy_id(args):
     if not args.strategy_id:
         raise ValueError("该操作必须明确提供 --strategy-id")
 
-def main():
-    args = parse_args()
+def run(argv=None):
+    args = parse_args(argv)
     try:
         if args.show_monitor_config:
             monitor_config = load_json(MONITOR_CONFIG_FILE) if MONITOR_CONFIG_FILE.exists() else {}
@@ -952,5 +957,4 @@ def main():
         error_logger.exception("TEST_FAILED type=%s message=%s", type(exc).__name__, exc)
         return 1
 
-if __name__ == "__main__":
-    sys.exit(main())
+main = run

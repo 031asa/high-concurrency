@@ -7,4 +7,13 @@ logs/
 __pycache__/
 *.pyc
 .venv/
+build/
+result/
+.pytest_cache/
+*.so
+*.pyd
+*.c
+ydcore/_public_key.py
+*.private.pem
+*.license.json
 小白技术指导手册.md
