@@ -221,7 +221,49 @@ systemctl list-timers ydtrader-expiry.timer --all --no-pager
 
 同一安装不能重复执行 `activate` 来重新开始计时。
 
-## 八、完整运行并输入密码
+## 八、行情测试前检查 Windows 和 Linux 时间
+
+Windows 使用 Windows Time Service（`W32Time`）对外校时，WSL chrony 通过 Hyper-V PTP 设备 `/dev/ptp_hyperv` 直接跟随 Windows 宿主时钟。时间链路必须是：
+
+```text
+经批准的外部 NTP → Windows W32Time → Hyper-V PHC0 → WSL chrony
+```
+
+只让 Windows 和 Linux 各自跟随不同公网 NTP 不能保证它们彼此对齐。首次在 WSL 安装 chrony 后，运行一次：
+
+```bash
+cd ~/projects/yd_trader
+sudo scripts/setup_wsl_chrony_windows_sync.sh
+```
+
+该脚本会禁用 `systemd-timesyncd`，允许 chrony 在 WSL 中控制系统时钟，并将 Windows 提供的 `PHC0` 设为首选且可信的参考源。成功后 `chronyd` 进程不得带 `-x`，`chronyc sources -v` 应显示 `#* PHC0`。
+
+然后在 Windows PowerShell 中运行项目内检测脚本：
+
+```powershell
+cd "C:\Users\Hello\Documents\基础环境配置\outputs\share\share\yd_trader"
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\windows_time_sync.ps1
+```
+
+默认只检查，不修改系统。它会输出 Windows 当前实际时间源和配置源、chrony 当前参考源与偏差，检查 chronyd 是否真的能调整时钟以及是否选中 `PHC0`，并进行 7 次 Windows↔WSL 直接比较。默认 chrony 最大偏差是 20 ms，Windows↔WSL 最大时差是 50 ms；异常时输出 `RESULT: FAIL` 并返回退出码 2。
+
+要按 Windows 当前配置的时间源立即重新同步，以管理员身份打开 PowerShell：
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\windows_time_sync.ps1 -ResyncWindows
+```
+
+只有经负责人或 IT 确认时才修改 Windows NTP 服务器；脚本不提供默认第三方服务器：
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\windows_time_sync.ps1 `
+  -ResyncWindows `
+  -WindowsPeers "<经批准的NTP服务器1>,0x9 <经批准的NTP服务器2>,0x9"
+```
+
+行情延迟测试前必须看到 `RESULT: PASS`。如果只有 chrony 显示纳秒级偏差，但 Windows↔WSL 直接时差超标，仍不得把行情统计当作网络延迟。
+
+## 九、完整运行并输入密码
 
 先运行最安全的连接测试：只登录柜台、接收数据，不报单，10秒后退出。
 
@@ -274,7 +316,7 @@ cd /opt/ydtrader
 
 > 不要照抄示例合约和价格。没有负责人明确批准，严禁使用 `--send`、`--batch-cancel`、`--set-trading-right`、`--pause-two-layer` 或 `--resume-two-layer`。
 
-## 九、失败时查看退出码
+## 十、失败时查看退出码
 
 运行后立即执行：
 
@@ -299,7 +341,7 @@ tail -n 100 /opt/ydtrader/logs/error.log
 tail -n 100 /opt/ydtrader/logs/monitor.log
 ```
 
-## 十、本机与 leader 的区别
+## 十一、本机与 leader 的区别
 
 - 当前 WSL：可直接使用 `build_release.py` 生成调试包，目的是完整验证密码和授权链路。
 - leader：必须交付 `build_manylinux2014.sh` 构建的 GLIBC 2.17 兼容包。
