@@ -253,6 +253,8 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\windows_time_sync.
 powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\windows_time_sync.ps1 -ResyncWindows
 ```
 
+`-ResyncWindows` 会自动将异常的 `UpdateInterval` 恢复为 `100`（每1秒可进行一次渐进校正）。脚本会先实测 Windows 相对 NTP 的偏差；只有偏差超过 `MaxWindowsNtpOffsetMs`（默认50 ms）时，才临时把 `MaxAllowedPhaseOffset` 设为 `0` 执行一次立即跳时。无论同步成功还是失败，都会在 `finally` 中恢复原来的 `MaxAllowedPhaseOffset`。普通不带 `-ResyncWindows` 的检查模式不修改任何系统参数。
+
 只有经负责人或 IT 确认时才修改 Windows NTP 服务器；脚本不提供默认第三方服务器：
 
 ```powershell

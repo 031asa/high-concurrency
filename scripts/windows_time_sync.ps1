@@ -71,7 +71,6 @@ function Invoke-W32TimeResync {
         if ($LASTEXITCODE -ne 0) {
             throw "w32tm peer configuration failed with exit code $LASTEXITCODE."
         }
-        Restart-Service -Name W32Time
     }
     $configuredPeers = if (-not [string]::IsNullOrWhiteSpace($Peers)) {
         $Peers
@@ -80,14 +79,36 @@ function Invoke-W32TimeResync {
         (Get-ItemProperty -LiteralPath "HKLM:\SYSTEM\CurrentControlSet\Services\W32Time\Parameters").NtpServer
     }
     $probeServer = (($configuredPeers -split "\s+")[0] -replace ",0x[0-9A-Fa-f]+$", "")
-    $null = Get-WindowsNtpSample -Server $probeServer
+    $initialNtpSample = Get-WindowsNtpSample -Server $probeServer
 
-    & w32tm.exe /resync /rediscover
-    $resyncExitCode = $LASTEXITCODE
-    if ($resyncExitCode -ne 0) {
-        throw "w32tm resync/rediscover failed with exit code $resyncExitCode."
+    $configPath = "HKLM:\SYSTEM\CurrentControlSet\Services\W32Time\Config"
+    $w32Config = Get-ItemProperty -LiteralPath $configPath
+    $originalMaxAllowedPhaseOffset = [int]$w32Config.MaxAllowedPhaseOffset
+    $requiresImmediateStep = $initialNtpSample.MaximumAbsoluteOffsetMs -gt $MaxWindowsNtpOffsetMs
+
+    # Keep normal gradual corrections responsive on standalone Windows hosts.
+    # The Windows policy default is 100 hundredths of a second (one second).
+    Set-ItemProperty -LiteralPath $configPath -Name UpdateInterval -Value 100
+    if ($requiresImmediateStep) {
+        Write-Output ("NTP offset exceeds {0} ms; requesting one immediate clock step." -f $MaxWindowsNtpOffsetMs)
+        Set-ItemProperty -LiteralPath $configPath -Name MaxAllowedPhaseOffset -Value 0
     }
-    Start-Sleep -Seconds 5
+
+    try {
+        Restart-Service -Name W32Time
+        & w32tm.exe /resync /rediscover
+        $resyncExitCode = $LASTEXITCODE
+        if ($resyncExitCode -ne 0) {
+            throw "w32tm resync/rediscover failed with exit code $resyncExitCode."
+        }
+        Start-Sleep -Seconds 5
+    }
+    finally {
+        if ($requiresImmediateStep) {
+            Set-ItemProperty -LiteralPath $configPath -Name MaxAllowedPhaseOffset -Value $originalMaxAllowedPhaseOffset
+            & w32tm.exe /config /update | Out-Null
+        }
+    }
 }
 
 function Invoke-WslText {
@@ -188,7 +209,7 @@ try {
     Write-Output "Configured peers : $($w32Parameters.NtpServer)"
     Write-Output "Active source    : $windowsSource"
     Write-Output "Probe server     : $($windowsNtp.Server)"
-    Write-Output ("NTP offset       : {0:+0.000;-0.000;0.000} ms (Windows minus NTP)" -f $windowsNtp.AverageOffsetMs)
+    Write-Output ("NTP offset       : {0:+0.000;-0.000;0.000} ms (signed w32tm sample)" -f $windowsNtp.AverageOffsetMs)
     Write-Output ("NTP max absolute : {0:0.000} ms from {1} samples" -f $windowsNtp.MaximumAbsoluteOffsetMs, $windowsNtp.Samples)
     Write-Output ""
     Write-Output "=== Linux chrony ==="
