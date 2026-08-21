@@ -6,6 +6,8 @@ param(
     [int]$MaxCrossClockOffsetMs = 50,
     [ValidateRange(1, 10000)]
     [int]$MaxChronyOffsetMs = 20,
+    [ValidateRange(1, 10000)]
+    [int]$MaxWindowsNtpOffsetMs = 50,
     [ValidateRange(3, 31)]
     [int]$Samples = 7,
     [switch]$ResyncWindows,
@@ -20,6 +22,40 @@ function Test-IsAdministrator {
     $identity = [Security.Principal.WindowsIdentity]::GetCurrent()
     $principal = New-Object Security.Principal.WindowsPrincipal($identity)
     return $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
+}
+
+function Get-WindowsNtpSample {
+    param(
+        [string]$Server,
+        [int]$SampleCount = 3
+    )
+
+    $stripchartOutput = & w32tm.exe /stripchart "/computer:$Server" /dataonly "/samples:$SampleCount" 2>&1
+    if ($LASTEXITCODE -ne 0) {
+        throw "The configured Windows NTP server '$Server' returned no usable data."
+    }
+
+    $offsetsMs = New-Object System.Collections.Generic.List[double]
+    foreach ($line in $stripchartOutput) {
+        if ($line -match "(?<sign>[+-])(?<seconds>\d+(?:[.,]\d+)?)s\s*$") {
+            $secondsText = $Matches.seconds.Replace(",", ".")
+            $offsetMs = [double]::Parse($secondsText, $InvariantCulture) * 1000.0
+            if ($Matches.sign -eq "-") {
+                $offsetMs = -$offsetMs
+            }
+            $offsetsMs.Add($offsetMs)
+        }
+    }
+    if ($offsetsMs.Count -eq 0) {
+        throw "Unable to parse NTP offsets returned by '$Server'."
+    }
+
+    return [pscustomobject]@{
+        Server = $Server
+        AverageOffsetMs = ($offsetsMs | Measure-Object -Average).Average
+        MaximumAbsoluteOffsetMs = ($offsetsMs | ForEach-Object { [math]::Abs($_) } | Measure-Object -Maximum).Maximum
+        Samples = $offsetsMs.Count
+    }
 }
 
 function Invoke-W32TimeResync {
@@ -44,10 +80,7 @@ function Invoke-W32TimeResync {
         (Get-ItemProperty -LiteralPath "HKLM:\SYSTEM\CurrentControlSet\Services\W32Time\Parameters").NtpServer
     }
     $probeServer = (($configuredPeers -split "\s+")[0] -replace ",0x[0-9A-Fa-f]+$", "")
-    & w32tm.exe /stripchart "/computer:$probeServer" /dataonly /samples:3
-    if ($LASTEXITCODE -ne 0) {
-        throw "The configured Windows NTP server '$probeServer' returned no usable data."
-    }
+    $null = Get-WindowsNtpSample -Server $probeServer
 
     & w32tm.exe /resync /rediscover
     $resyncExitCode = $LASTEXITCODE
@@ -136,6 +169,8 @@ try {
         Invoke-W32TimeResync -Peers $WindowsPeers
     }
     $w32Parameters = Get-ItemProperty -LiteralPath "HKLM:\SYSTEM\CurrentControlSet\Services\W32Time\Parameters"
+    $windowsProbeServer = (($w32Parameters.NtpServer -split "\s+")[0] -replace ",0x[0-9A-Fa-f]+$", "")
+    $windowsNtp = Get-WindowsNtpSample -Server $windowsProbeServer
     $windowsSourceOutput = & w32tm.exe /query /source 2>&1
     if ($LASTEXITCODE -eq 0) {
         $windowsSource = (($windowsSourceOutput | Out-String).Trim())
@@ -151,6 +186,9 @@ try {
     Write-Output "Mode             : $($w32Parameters.Type)"
     Write-Output "Configured peers : $($w32Parameters.NtpServer)"
     Write-Output "Active source    : $windowsSource"
+    Write-Output "Probe server     : $($windowsNtp.Server)"
+    Write-Output ("NTP offset       : {0:+0.000;-0.000;0.000} ms (Windows minus NTP)" -f $windowsNtp.AverageOffsetMs)
+    Write-Output ("NTP max absolute : {0:0.000} ms from {1} samples" -f $windowsNtp.MaximumAbsoluteOffsetMs, $windowsNtp.Samples)
     Write-Output ""
     Write-Output "=== Linux chrony ==="
     Write-Output "Reference        : $($chrony.ReferenceId)"
@@ -169,6 +207,9 @@ try {
     Write-Output ("Best round trip  : {0} ms from {1} samples" -f $crossClock.RoundTripMs, $Samples)
 
     $failures = New-Object System.Collections.Generic.List[string]
+    if ([math]::Abs($windowsNtp.AverageOffsetMs) -gt $MaxWindowsNtpOffsetMs) {
+        $failures.Add("Windows/NTP offset exceeds $MaxWindowsNtpOffsetMs ms")
+    }
     if ($chrony.LeapStatus -ne "Normal") {
         $failures.Add("chrony leap status is '$($chrony.LeapStatus)', not Normal")
     }

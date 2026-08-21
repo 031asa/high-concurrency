@@ -245,7 +245,7 @@ cd "C:\Users\Hello\Documents\基础环境配置\outputs\share\share\yd_trader"
 powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\windows_time_sync.ps1
 ```
 
-默认只检查，不修改系统。它会输出 Windows 当前实际时间源和配置源、chrony 当前参考源与偏差，检查 chronyd 是否真的能调整时钟以及是否选中 `PHC0`，并进行 7 次 Windows↔WSL 直接比较。默认 chrony 最大偏差是 20 ms，Windows↔WSL 最大时差是 50 ms；异常时输出 `RESULT: FAIL` 并返回退出码 2。
+默认只检查，不修改系统。它会输出 Windows 当前实际时间源和配置源、Windows 相对该 NTP 源的3次实测偏差、chrony 当前参考源与偏差，检查 chronyd 是否真的能调整时钟以及是否选中 `PHC0`，并进行 7 次 Windows↔WSL 直接比较。默认 Windows↔NTP、chrony 和 Windows↔WSL 三类最大允许偏差分别为 50 ms、20 ms 和 50 ms；异常时输出 `RESULT: FAIL` 并返回退出码 2。
 
 要按 Windows 当前配置的时间源立即重新同步，以管理员身份打开 PowerShell：
 
