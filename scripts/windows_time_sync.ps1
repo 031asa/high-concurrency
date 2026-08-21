@@ -37,17 +37,41 @@ function Invoke-W32TimeResync {
         }
         Restart-Service -Name W32Time
     }
-    & w32tm.exe /resync /force
+    $configuredPeers = if (-not [string]::IsNullOrWhiteSpace($Peers)) {
+        $Peers
+    }
+    else {
+        (Get-ItemProperty -LiteralPath "HKLM:\SYSTEM\CurrentControlSet\Services\W32Time\Parameters").NtpServer
+    }
+    $probeServer = (($configuredPeers -split "\s+")[0] -replace ",0x[0-9A-Fa-f]+$", "")
+    & w32tm.exe /stripchart "/computer:$probeServer" /dataonly /samples:3
     if ($LASTEXITCODE -ne 0) {
-        throw "w32tm resync failed with exit code $LASTEXITCODE."
+        throw "The configured Windows NTP server '$probeServer' returned no usable data."
+    }
+
+    & w32tm.exe /resync /rediscover
+    $resyncExitCode = $LASTEXITCODE
+    if ($resyncExitCode -ne 0) {
+        throw "w32tm resync/rediscover failed with exit code $resyncExitCode."
     }
 }
 
 function Invoke-WslText {
     param([string[]]$LinuxArguments)
 
-    $output = & wsl.exe -d $Distro --exec @LinuxArguments 2>$null
-    if ($LASTEXITCODE -ne 0) {
+    $previousErrorActionPreference = $ErrorActionPreference
+    try {
+        # Windows PowerShell 5.1 converts harmless WSL stderr warnings (for
+        # example the localhost proxy warning) into ErrorRecord objects.
+        # Keep the native exit code authoritative and discard that stderr.
+        $ErrorActionPreference = "Continue"
+        $output = & wsl.exe -d $Distro --exec @LinuxArguments 2>$null
+        $wslExitCode = $LASTEXITCODE
+    }
+    finally {
+        $ErrorActionPreference = $previousErrorActionPreference
+    }
+    if ($wslExitCode -ne 0) {
         throw "WSL command failed in distro '$Distro': $($LinuxArguments -join ' ')"
     }
     return (($output | Out-String).Trim())
