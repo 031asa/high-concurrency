@@ -51,13 +51,7 @@ cd /opt/ydtrader
 
 结束时终端会直接输出中文汇总，包括收到行情条数、有效时间戳样本数、平均延迟（绝对值）、最小/最大延迟及“本机减行情”的平均时间差。平均延迟包含本机与行情源的时钟偏差，不等同于纯网络单向延迟；测试前应确认两端时钟已同步。
 
-在 Windows＋WSL 开发机上，行情测试前先在 WSL 运行一次 `sudo scripts/setup_wsl_chrony_windows_sync.sh`，使 Linux chrony 通过 Hyper-V `PHC0` 直接跟随 Windows 时钟。然后在 Windows PowerShell 运行：
-
-```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\windows_time_sync.ps1
-```
-
-必须看到 `RESULT: PASS`。该脚本会同时检查 Windows `W32Time`、WSL chrony 是否真能调整时钟、chrony 是否选中 Windows `PHC0`，以及 Windows↔WSL 直接时差。完整的重新同步和阈值说明见 `README_本机激活与完整运行.md` 第八节。
+行情测试前，Windows 与 Linux 必须分别直接连接同一个授时中心，并在60秒内生成 JSON 报告进行比较。完整有效流程见项目根目录 `README_授时与行情延迟操作手册.md`；最终没有看到 `RESULT: PASS` 时不得继续解释行情延迟。本项目不再使用 Windows `PHC0` 作为 Linux 时间源。
 
 仅做 `checked=2` 委托校验，不把订单报到交易所。所有参数都要由测试人员按本次测试填写：
 

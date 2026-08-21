@@ -16,6 +16,7 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 BUILD_ROOT = PROJECT_ROOT / "build"
 RESULT_ROOT = PROJECT_ROOT / "result"
 RELEASE_NAME = "ydtrader-linux-x86_64"
+TIME_MANUAL = "README_授时与行情延迟操作手册.md"
 
 
 def run(*args):
@@ -40,6 +41,24 @@ def load_private_key(path):
     except TypeError:
         password = getpass("发证私钥密码: ").encode("utf-8")
         return load_pem_private_key(raw, password=password)
+
+
+def copy_release_support_files(release):
+    docs = release / "docs"
+    tools = release / "tools"
+    config = release / "config"
+    docs.mkdir()
+    tools.mkdir()
+    config.mkdir()
+    shutil.copy2(PROJECT_ROOT / TIME_MANUAL, docs / TIME_MANUAL)
+    for name in ("setup_linux_time_sync.sh", "linux_time_report.sh"):
+        target = tools / name
+        shutil.copy2(PROJECT_ROOT / "scripts" / name, target)
+        os.chmod(target, 0o755)
+    shutil.copy2(
+        PROJECT_ROOT / "config" / "time_authority.cffex.example.conf",
+        config / "time_authority.cffex.example.conf",
+    )
 
 
 def main(argv=None):
@@ -90,6 +109,7 @@ def main(argv=None):
     shutil.copy2(PROJECT_ROOT / "error_code.csv", app / "error_code.csv")
     shutil.copytree(PROJECT_ROOT / "install", release / "install")
     shutil.copy2(args.public_key, release / "install" / "ydtrader-public.pem")
+    copy_release_support_files(release)
     for required in (app / "pyyd.so", app / "yd.so"):
         if not required.is_file():
             raise SystemExit(f"vendor runtime missing from standalone output: {required}")

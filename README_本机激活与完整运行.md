@@ -223,49 +223,7 @@ systemctl list-timers ydtrader-expiry.timer --all --no-pager
 
 ## 八、行情测试前检查 Windows 和 Linux 时间
 
-Windows 使用 Windows Time Service（`W32Time`）对外校时，WSL chrony 通过 Hyper-V PTP 设备 `/dev/ptp_hyperv` 直接跟随 Windows 宿主时钟。时间链路必须是：
-
-```text
-经批准的外部 NTP → Windows W32Time → Hyper-V PHC0 → WSL chrony
-```
-
-只让 Windows 和 Linux 各自跟随不同公网 NTP 不能保证它们彼此对齐。首次在 WSL 安装 chrony 后，运行一次：
-
-```bash
-cd ~/projects/yd_trader
-sudo scripts/setup_wsl_chrony_windows_sync.sh
-```
-
-该脚本会禁用 `systemd-timesyncd`，允许 chrony 在 WSL 中控制系统时钟，并将 Windows 提供的 `PHC0` 设为首选且可信的参考源。成功后 `chronyd` 进程不得带 `-x`，`chronyc sources -v` 应显示 `#* PHC0`。
-
-然后在 Windows PowerShell 中运行项目内检测脚本：
-
-```powershell
-cd "C:\Users\Hello\Documents\基础环境配置\outputs\share\share\yd_trader"
-powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\windows_time_sync.ps1
-```
-
-默认只检查，不修改系统。它会输出 Windows 当前实际时间源和配置源、Windows 相对该 NTP 源的3次实测偏差、chrony 当前参考源与偏差，检查 chronyd 是否真的能调整时钟以及是否选中 `PHC0`，并进行 7 次 Windows↔WSL 直接比较。默认 Windows↔NTP、chrony 和 Windows↔WSL 三类最大允许偏差分别为 50 ms、20 ms 和 50 ms；异常时输出 `RESULT: FAIL` 并返回退出码 2。
-
-要按 Windows 当前配置的时间源立即重新同步，以管理员身份打开 PowerShell：
-
-```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\windows_time_sync.ps1 -ResyncWindows
-```
-
-`-ResyncWindows` 会自动将异常的 `UpdateInterval` 恢复为 `100`（每1秒可进行一次渐进校正）。脚本会先实测 Windows 相对 NTP 的偏差；只有偏差超过 `MaxWindowsNtpOffsetMs`（默认50 ms）时，才临时把 `MaxAllowedPhaseOffset` 设为 `0` 执行一次立即跳时。无论同步成功还是失败，都会在 `finally` 中恢复原来的 `MaxAllowedPhaseOffset`。普通不带 `-ResyncWindows` 的检查模式不修改任何系统参数。
-
-只有经负责人或 IT 确认时才修改 Windows NTP 服务器；脚本不提供默认第三方服务器：
-
-```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\windows_time_sync.ps1 `
-  -ResyncWindows `
-  -WindowsPeers "<经批准的NTP服务器1>,0x8 <经批准的NTP服务器2>,0x8"
-```
-
-Windows 手工 NTP 服务器后缀建议使用 `0x8`（客户端模式）。`0x9` 还包含特殊固定轮询标志；当 `SpecialPollInterval` 很大时，不适合临时行情延迟测试的快速校时。
-
-行情延迟测试前必须看到 `RESULT: PASS`。如果只有 chrony 显示纳秒级偏差，但 Windows↔WSL 直接时差超标，仍不得把行情统计当作网络延迟。
+Windows 和 Linux 必须各自直接连接同一个授时中心，分别生成 JSON 后比较；Linux 不再跟随 Windows `PHC0`。配置、校时、60秒内生成报告及验收命令统一见项目根目录 `README_授时与行情延迟操作手册.md`。最终没有看到 `RESULT: PASS` 时，不得把行情统计解释为真实网络延迟。
 
 ## 九、完整运行并输入密码
 

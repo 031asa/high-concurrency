@@ -1,22 +1,13 @@
 [CmdletBinding()]
 param(
-    [ValidateNotNullOrEmpty()]
-    [string]$Distro = "Ubuntu-24.04",
-    [ValidateRange(1, 10000)]
-    [int]$MaxCrossClockOffsetMs = 50,
-    [ValidateRange(1, 10000)]
-    [int]$MaxChronyOffsetMs = 20,
-    [ValidateRange(1, 10000)]
-    [int]$MaxWindowsNtpOffsetMs = 50,
-    [ValidateRange(3, 31)]
-    [int]$Samples = 7,
-    [switch]$ResyncWindows,
-    [string]$WindowsPeers = ""
+    [Parameter(Mandatory = $true)][ValidateNotNullOrEmpty()][string]$Config,
+    [switch]$Apply,
+    [Parameter(Mandatory = $true)][ValidateNotNullOrEmpty()][string]$Output
 )
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
-$InvariantCulture = [System.Globalization.CultureInfo]::InvariantCulture
+$Invariant = [Globalization.CultureInfo]::InvariantCulture
 
 function Test-IsAdministrator {
     $identity = [Security.Principal.WindowsIdentity]::GetCurrent()
@@ -24,253 +15,150 @@ function Test-IsAdministrator {
     return $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
 }
 
-function Get-WindowsNtpSample {
-    param(
-        [string]$Server,
-        [int]$SampleCount = 3
-    )
-
-    $stripchartOutput = & w32tm.exe /stripchart "/computer:$Server" /dataonly "/samples:$SampleCount" 2>&1
-    if ($LASTEXITCODE -ne 0) {
-        throw "The configured Windows NTP server '$Server' returned no usable data."
+function Read-TimeAuthorityConfig([string]$Path) {
+    if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) { throw "Config not found: $Path" }
+    $values = @{}
+    foreach ($line in [IO.File]::ReadAllLines((Resolve-Path -LiteralPath $Path))) {
+        $trimmed = $line.Trim()
+        if ($trimmed.Length -eq 0 -or $trimmed.StartsWith("#")) { continue }
+        $parts = $trimmed.Split(@("="), 2, [StringSplitOptions]::None)
+        if ($parts.Count -ne 2) { throw "Invalid config line: $line" }
+        $values[$parts[0].Trim()] = $parts[1].Trim()
     }
-
-    $offsetsMs = New-Object System.Collections.Generic.List[double]
-    foreach ($line in $stripchartOutput) {
-        if ($line -match "(?<sign>[+-])(?<seconds>\d+(?:[.,]\d+)?)s\s*$") {
-            $secondsText = $Matches.seconds.Replace(",", ".")
-            $offsetMs = [double]::Parse($secondsText, $InvariantCulture) * 1000.0
-            if ($Matches.sign -eq "-") {
-                $offsetMs = -$offsetMs
-            }
-            $offsetsMs.Add($offsetMs)
-        }
+    foreach ($key in @("authority_name", "authority_url", "ntp_servers", "environment", "max_offset_ms", "max_cross_difference_ms")) {
+        if (-not $values.ContainsKey($key) -or [string]::IsNullOrWhiteSpace($values[$key])) { throw "Missing config value: $key" }
     }
-    if ($offsetsMs.Count -eq 0) {
-        throw "Unable to parse NTP offsets returned by '$Server'."
+    if ($values.authority_url -notmatch '^https?://') { throw "authority_url must be HTTP(S)." }
+    if ($values.environment -notin @("test", "production")) { throw "environment must be test or production." }
+    if ($values.ntp_servers -match 'REPLACE_|PLACEHOLDER') { throw "Refusing placeholder NTP configuration." }
+    $servers = @($values.ntp_servers -split '\s+' | Where-Object { $_ })
+    foreach ($server in $servers) {
+        if ($server -notmatch '^[A-Za-z0-9._:-]+$') { throw "Invalid NTP server: $server" }
     }
-
+    $maxOffset = 0
+    $maxCross = 0
+    if (-not [int]::TryParse($values.max_offset_ms, [ref]$maxOffset) -or $maxOffset -le 0) { throw "Invalid max_offset_ms." }
+    if (-not [int]::TryParse($values.max_cross_difference_ms, [ref]$maxCross) -or $maxCross -le 0) { throw "Invalid max_cross_difference_ms." }
     return [pscustomobject]@{
-        Server = $Server
-        AverageOffsetMs = ($offsetsMs | Measure-Object -Average).Average
-        MaximumAbsoluteOffsetMs = ($offsetsMs | ForEach-Object { [math]::Abs($_) } | Measure-Object -Maximum).Maximum
-        Samples = $offsetsMs.Count
+        Name = $values.authority_name; Url = $values.authority_url; Servers = $servers
+        Environment = $values.environment; MaxOffsetMs = $maxOffset; MaxCrossDifferenceMs = $maxCross
     }
 }
 
-function Invoke-W32TimeResync {
-    param([string]$Peers)
-
-    if (-not (Test-IsAdministrator)) {
-        throw "Windows time resync/configuration requires an Administrator PowerShell."
+function Get-NtpSamples([string[]]$Servers, [int]$SamplesPerServer = 3) {
+    $samples = New-Object System.Collections.Generic.List[double]
+    $usedServers = New-Object System.Collections.Generic.List[string]
+    $errors = New-Object System.Collections.Generic.List[string]
+    foreach ($server in $Servers) {
+        $raw = & w32tm.exe /stripchart "/computer:$server" /dataonly "/samples:$SamplesPerServer" 2>&1
+        if ($LASTEXITCODE -ne 0) { $errors.Add("$server returned no usable NTP data"); continue }
+        $before = $samples.Count
+        foreach ($line in $raw) {
+            if ($line -match '(?<sign>[+-])(?<seconds>\d+(?:[.,]\d+)?)s\s*$') {
+                $milliseconds = [double]::Parse($Matches.seconds.Replace(",", "."), $Invariant) * 1000.0
+                if ($Matches.sign -eq "-") { $milliseconds = -$milliseconds }
+                # W32Time phase/NTP offset is the correction from the local
+                # clock toward the target: authority-minus-local.
+                $samples.Add($milliseconds)
+            }
+        }
+        if ($samples.Count -gt $before) { $usedServers.Add($server) } else { $errors.Add("$server offsets could not be parsed") }
     }
+    $average = 0.0
+    $maximum = 0.0
+    if ($samples.Count -gt 0) {
+        $average = [double](($samples | Measure-Object -Average).Average)
+        $maximum = [double](($samples | ForEach-Object { [math]::Abs($_) } | Measure-Object -Maximum).Maximum)
+    }
+    return [pscustomobject]@{ Values = @($samples); Average = $average; Maximum = $maximum; Servers = @($usedServers); Errors = @($errors) }
+}
+
+function Invoke-TimeConfiguration($Settings, $InitialSamples) {
+    if (-not (Test-IsAdministrator)) { throw "-Apply requires an Administrator PowerShell." }
+    if ($InitialSamples.Values.Count -eq 0) { throw "No valid NTP samples; refusing to change Windows time configuration." }
+    $peers = (($Settings.Servers | ForEach-Object { "$_,0x8" }) -join " ")
     Set-Service -Name W32Time -StartupType Automatic
     Start-Service -Name W32Time
-    if (-not [string]::IsNullOrWhiteSpace($Peers)) {
-        & w32tm.exe /config "/manualpeerlist:$Peers" /syncfromflags:manual /reliable:no /update
-        if ($LASTEXITCODE -ne 0) {
-            throw "w32tm peer configuration failed with exit code $LASTEXITCODE."
-        }
+    & w32tm.exe /config "/manualpeerlist:$peers" /syncfromflags:manual /reliable:no /update
+    if ($LASTEXITCODE -ne 0) { throw "w32tm peer configuration failed with exit code $LASTEXITCODE." }
+    $registry = "HKLM:\SYSTEM\CurrentControlSet\Services\W32Time\Config"
+    $originalStepLimit = [int](Get-ItemProperty -LiteralPath $registry).MaxAllowedPhaseOffset
+    $needsStep = $InitialSamples.Maximum -gt $Settings.MaxOffsetMs
+    Set-ItemProperty -LiteralPath $registry -Name UpdateInterval -Value 100
+    if ($needsStep) {
+        Write-Output ("Offset exceeds {0} ms; requesting one immediate correction." -f $Settings.MaxOffsetMs)
+        Set-ItemProperty -LiteralPath $registry -Name MaxAllowedPhaseOffset -Value 0
     }
-    $configuredPeers = if (-not [string]::IsNullOrWhiteSpace($Peers)) {
-        $Peers
-    }
-    else {
-        (Get-ItemProperty -LiteralPath "HKLM:\SYSTEM\CurrentControlSet\Services\W32Time\Parameters").NtpServer
-    }
-    $probeServer = (($configuredPeers -split "\s+")[0] -replace ",0x[0-9A-Fa-f]+$", "")
-    $initialNtpSample = Get-WindowsNtpSample -Server $probeServer
-
-    $configPath = "HKLM:\SYSTEM\CurrentControlSet\Services\W32Time\Config"
-    $w32Config = Get-ItemProperty -LiteralPath $configPath
-    $originalMaxAllowedPhaseOffset = [int]$w32Config.MaxAllowedPhaseOffset
-    $requiresImmediateStep = $initialNtpSample.MaximumAbsoluteOffsetMs -gt $MaxWindowsNtpOffsetMs
-
-    # Keep normal gradual corrections responsive on standalone Windows hosts.
-    # The Windows policy default is 100 hundredths of a second (one second).
-    Set-ItemProperty -LiteralPath $configPath -Name UpdateInterval -Value 100
-    if ($requiresImmediateStep) {
-        Write-Output ("NTP offset exceeds {0} ms; requesting one immediate clock step." -f $MaxWindowsNtpOffsetMs)
-        Set-ItemProperty -LiteralPath $configPath -Name MaxAllowedPhaseOffset -Value 0
-    }
-
     try {
         Restart-Service -Name W32Time
-        & w32tm.exe /resync /rediscover
-        $resyncExitCode = $LASTEXITCODE
-        if ($resyncExitCode -ne 0) {
-            throw "w32tm resync/rediscover failed with exit code $resyncExitCode."
+        $ok = $false
+        for ($attempt = 1; $attempt -le 3; $attempt++) {
+            & w32tm.exe /resync /rediscover
+            if ($LASTEXITCODE -eq 0) { $ok = $true; break }
+            Start-Sleep -Seconds 3
         }
+        if (-not $ok) { throw "w32tm resync failed after three attempts." }
         Start-Sleep -Seconds 5
     }
     finally {
-        if ($requiresImmediateStep) {
-            Set-ItemProperty -LiteralPath $configPath -Name MaxAllowedPhaseOffset -Value $originalMaxAllowedPhaseOffset
+        if ($needsStep) {
+            Set-ItemProperty -LiteralPath $registry -Name MaxAllowedPhaseOffset -Value $originalStepLimit
             & w32tm.exe /config /update | Out-Null
         }
     }
 }
 
-function Invoke-WslText {
-    param([string[]]$LinuxArguments)
-
-    $previousErrorActionPreference = $ErrorActionPreference
-    try {
-        # Windows PowerShell 5.1 converts harmless WSL stderr warnings (for
-        # example the localhost proxy warning) into ErrorRecord objects.
-        # Keep the native exit code authoritative and discard that stderr.
-        $ErrorActionPreference = "Continue"
-        $output = & wsl.exe -d $Distro --exec @LinuxArguments 2>$null
-        $wslExitCode = $LASTEXITCODE
+function Write-Utf8Json($Value, [string]$Path) {
+    $full = [IO.Path]::GetFullPath($Path)
+    $parent = Split-Path -Parent $full
+    if (-not (Test-Path -LiteralPath $parent -PathType Container)) { throw "Output directory does not exist: $parent" }
+    if (Test-Path -LiteralPath $full -PathType Leaf) {
+        if ((Get-Item -LiteralPath $full -Force).Attributes -band [IO.FileAttributes]::ReparsePoint) { throw "Refusing symbolic-link output: $full" }
     }
-    finally {
-        $ErrorActionPreference = $previousErrorActionPreference
-    }
-    if ($wslExitCode -ne 0) {
-        throw "WSL command failed in distro '$Distro': $($LinuxArguments -join ' ')"
-    }
-    return (($output | Out-String).Trim())
-}
-
-function Get-ChronyStatus {
-    $chronydArguments = Invoke-WslText -LinuxArguments @("ps", "-C", "chronyd", "-o", "args=")
-    $tracking = Invoke-WslText -LinuxArguments @("chronyc", "-c", "tracking")
-    $fields = $tracking.Split(",")
-    if ($fields.Count -lt 14) {
-        throw "Unexpected chronyc tracking CSV output: $tracking"
-    }
-    $sources = Invoke-WslText -LinuxArguments @("chronyc", "-c", "sources", "-n")
-    $selectedSource = "NONE"
-    $selectedMode = "NONE"
-    foreach ($line in ($sources -split "`r?`n")) {
-        $sourceFields = $line.Split(",")
-        if ($sourceFields.Count -ge 3 -and $sourceFields[1] -eq "*") {
-            $selectedSource = $sourceFields[2]
-            $selectedMode = $sourceFields[0]
-            break
-        }
-    }
-    return [pscustomobject]@{
-        ReferenceId = $fields[1]
-        Stratum = [int]$fields[2]
-        SystemTimeMs = [double]::Parse($fields[4], $InvariantCulture) * 1000.0
-        LastOffsetMs = [double]::Parse($fields[5], $InvariantCulture) * 1000.0
-        RootDispersionMs = [double]::Parse($fields[11], $InvariantCulture) * 1000.0
-        LeapStatus = $fields[13].Trim()
-        SelectedSource = $selectedSource
-        SelectedMode = $selectedMode
-        ControlsSystemClock = -not ($chronydArguments -match "(^|\s)-[A-Za-z0-9]*x(\s|$)")
-        DaemonArguments = $chronydArguments
-    }
-}
-
-function Get-BestCrossClockSample {
-    $results = New-Object System.Collections.Generic.List[object]
-    for ($index = 0; $index -lt $Samples; $index++) {
-        $windowsBeforeMs = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()
-        $rawLinuxTime = Invoke-WslText -LinuxArguments @("date", "+%s%3N")
-        $windowsAfterMs = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()
-        if ($rawLinuxTime -notmatch "^\d{13}$") {
-            throw "Unexpected Linux epoch milliseconds: $rawLinuxTime"
-        }
-        $linuxMs = [long]$rawLinuxTime
-        $roundTripMs = $windowsAfterMs - $windowsBeforeMs
-        $results.Add([pscustomobject]@{
-            EstimatedOffsetMs = $linuxMs - (($windowsBeforeMs + $windowsAfterMs) / 2.0)
-            UncertaintyMs = $roundTripMs / 2.0
-            MinimumPossibleOffsetMs = $linuxMs - $windowsAfterMs
-            MaximumPossibleOffsetMs = $linuxMs - $windowsBeforeMs
-            RoundTripMs = $roundTripMs
-        })
-    }
-    return $results | Sort-Object RoundTripMs | Select-Object -First 1
+    [IO.File]::WriteAllText($full, ($Value | ConvertTo-Json -Depth 6), (New-Object Text.UTF8Encoding($false)))
 }
 
 try {
-    if ($ResyncWindows -or -not [string]::IsNullOrWhiteSpace($WindowsPeers)) {
-        Invoke-W32TimeResync -Peers $WindowsPeers
+    $settings = Read-TimeAuthorityConfig $Config
+    $initial = Get-NtpSamples $settings.Servers
+    if ($Apply) { Invoke-TimeConfiguration $settings $initial }
+    $samples = if ($Apply) { Get-NtpSamples $settings.Servers } else { $initial }
+    $sourceRaw = & w32tm.exe /query /source 2>&1
+    $activeSource = if ($LASTEXITCODE -eq 0) { (($sourceRaw | Out-String).Trim()) } else { "UNAVAILABLE" }
+    $resolved = New-Object System.Collections.Generic.List[string]
+    foreach ($server in $settings.Servers) {
+        try { [Net.Dns]::GetHostAddresses($server) | ForEach-Object { if (-not $resolved.Contains($_.IPAddressToString)) { $resolved.Add($_.IPAddressToString) } } } catch { }
     }
-    $w32Parameters = Get-ItemProperty -LiteralPath "HKLM:\SYSTEM\CurrentControlSet\Services\W32Time\Parameters"
-    $windowsProbeServer = (($w32Parameters.NtpServer -split "\s+")[0] -replace ",0x[0-9A-Fa-f]+$", "")
-    $windowsNtp = Get-WindowsNtpSample -Server $windowsProbeServer
-    $windowsSourceOutput = & w32tm.exe /query /source 2>&1
-    if ($LASTEXITCODE -eq 0) {
-        $windowsSource = (($windowsSourceOutput | Out-String).Trim())
-    }
-    else {
-        $windowsSource = "UNAVAILABLE (run as Administrator to query the active source)"
-    }
-    $chrony = Get-ChronyStatus
-    $crossClock = Get-BestCrossClockSample
-
-    Write-Output "=== Windows time ==="
-    Write-Output "Service          : W32Time"
-    Write-Output "Mode             : $($w32Parameters.Type)"
-    Write-Output "Configured peers : $($w32Parameters.NtpServer)"
-    Write-Output "Active source    : $windowsSource"
-    Write-Output "Probe server     : $($windowsNtp.Server)"
-    Write-Output ("NTP offset       : {0:+0.000;-0.000;0.000} ms (signed w32tm sample)" -f $windowsNtp.AverageOffsetMs)
-    Write-Output ("NTP max absolute : {0:0.000} ms from {1} samples" -f $windowsNtp.MaximumAbsoluteOffsetMs, $windowsNtp.Samples)
-    Write-Output ""
-    Write-Output "=== Linux chrony ==="
-    Write-Output "Reference        : $($chrony.ReferenceId)"
-    Write-Output "Selected source  : $($chrony.SelectedSource)"
-    Write-Output "Source mode      : $($chrony.SelectedMode) (# means local refclock)"
-    Write-Output "Controls clock   : $($chrony.ControlsSystemClock)"
-    Write-Output "Daemon arguments : $($chrony.DaemonArguments)"
-    Write-Output ("System time      : {0:+0.000;-0.000;0.000} ms" -f $chrony.SystemTimeMs)
-    Write-Output ("Last offset      : {0:+0.000;-0.000;0.000} ms" -f $chrony.LastOffsetMs)
-    Write-Output ("Root dispersion  : {0:0.000} ms" -f $chrony.RootDispersionMs)
-    Write-Output "Leap status      : $($chrony.LeapStatus)"
-    Write-Output ""
-    Write-Output "=== Windows <-> WSL ==="
-    Write-Output ("Estimated offset : {0:+0.000;-0.000;0.000} ms (Linux minus Windows)" -f $crossClock.EstimatedOffsetMs)
-    Write-Output ("Measurement +/-  : {0:0.000} ms" -f $crossClock.UncertaintyMs)
-    Write-Output ("Best round trip  : {0} ms from {1} samples" -f $crossClock.RoundTripMs, $Samples)
-
     $failures = New-Object System.Collections.Generic.List[string]
-    if ([math]::Abs($windowsNtp.AverageOffsetMs) -gt $MaxWindowsNtpOffsetMs) {
-        $failures.Add("Windows/NTP offset exceeds $MaxWindowsNtpOffsetMs ms")
+    if ($samples.Values.Count -eq 0) { $failures.Add("no valid NTP sample") }
+    if ($samples.Maximum -gt $settings.MaxOffsetMs) { $failures.Add("Windows/authority offset exceeds $($settings.MaxOffsetMs) ms") }
+    if ($activeSource -match 'Local CMOS Clock|本地\s*CMOS\s*时钟') { $failures.Add("W32Time is using the local CMOS clock") }
+    $sourceName = $activeSource -replace ',0x[0-9A-Fa-f]+$', ''
+    $activeAllowed = ($settings.Servers -contains $sourceName) -or ($resolved -contains $sourceName)
+    if (-not $activeAllowed) { $failures.Add("W32Time active source is not the configured authority") }
+    $report = [ordered]@{
+        schema = 1; platform = "windows"; hostname = $env:COMPUTERNAME
+        generated_at_utc = [DateTime]::UtcNow.ToString("yyyy-MM-ddTHH:mm:ss.fffZ", $Invariant)
+        authority = [ordered]@{ name = $settings.Name; url = $settings.Url; ntp_servers = @($settings.Servers); environment = $settings.Environment }
+        selected_source = $activeSource; resolved_ips = @($resolved)
+        authority_minus_local_ms = [math]::Round($samples.Average, 3); max_abs_sample_ms = [math]::Round($samples.Maximum, 3)
+        uncertainty_ms = 0.0; max_offset_ms = $settings.MaxOffsetMs; max_cross_difference_ms = $settings.MaxCrossDifferenceMs
+        sample_count = $samples.Values.Count; pass = ($failures.Count -eq 0); failure = ($failures -join "; ")
     }
-    if ($windowsSource -match "Local CMOS Clock|本地\s*CMOS\s*时钟") {
-        $failures.Add("W32Time is using the local CMOS clock instead of the configured NTP peer")
-    }
-    if ($chrony.LeapStatus -ne "Normal") {
-        $failures.Add("chrony leap status is '$($chrony.LeapStatus)', not Normal")
-    }
-    if ([math]::Abs($chrony.SystemTimeMs) -gt $MaxChronyOffsetMs) {
-        $failures.Add("chrony system-time offset exceeds $MaxChronyOffsetMs ms")
-    }
-    if ([math]::Abs($chrony.LastOffsetMs) -gt $MaxChronyOffsetMs) {
-        $failures.Add("chrony last offset exceeds $MaxChronyOffsetMs ms")
-    }
-    if ($chrony.SelectedSource -eq "NONE") {
-        $failures.Add("chrony has no selected source")
-    }
-    if (-not $chrony.ControlsSystemClock) {
-        $failures.Add("chronyd is running with -x and cannot adjust the Linux clock")
-    }
-    if ($chrony.SelectedMode -ne "#" -or $chrony.SelectedSource -ne "PHC0") {
-        $failures.Add("chrony is not following the Windows Hyper-V PHC0 host clock")
-    }
-    if ($crossClock.MinimumPossibleOffsetMs -gt $MaxCrossClockOffsetMs -or
-        $crossClock.MaximumPossibleOffsetMs -lt -$MaxCrossClockOffsetMs) {
-        $failures.Add("Windows/WSL offset exceeds $MaxCrossClockOffsetMs ms after measurement uncertainty")
-    }
-
+    Write-Utf8Json $report $Output
+    Write-Output "=== Windows time authority report ==="
+    Write-Output "Authority : $($settings.Name)"
+    Write-Output "Website   : $($settings.Url)"
+    Write-Output "NTP       : $($settings.Servers -join ', ')"
+    Write-Output "Active    : $activeSource"
+    Write-Output ("Offset    : {0:+0.000;-0.000;0.000} ms (authority minus Windows)" -f $samples.Average)
+    Write-Output "Report    : $Output"
     if ($failures.Count -gt 0) {
-        Write-Output ""
         Write-Output "RESULT: FAIL"
-        foreach ($failure in $failures) {
-            Write-Output "- $failure"
-        }
+        $failures | ForEach-Object { Write-Output "- $_" }
         exit 2
     }
-    Write-Output ""
     Write-Output "RESULT: PASS"
     exit 0
 }
-catch {
-    Write-Error $_
-    exit 1
-}
+catch { Write-Error $_; exit 1 }

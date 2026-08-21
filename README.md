@@ -24,6 +24,8 @@ tests/                         离线安全与回归测试
 
 旧 Windows 使用手册仅作为迁移参考保存在 `docs/legacy-windows-manual.md`，不属于当前交付方式。
 
+Windows/Linux 独立使用同一授时中心、生成 JSON 报告、比较时差并运行 IC2609 行情测试的唯一有效流程，见 `README_授时与行情延迟操作手册.md`。授时比较未显示 `RESULT: PASS` 时，不得解释行情延迟汇总。
+
 ## 构建环境
 
 正式发布要求 Linux x86_64、CPython 3.9 和 glibc 2.17 兼容构建环境。开发机可在 WSL 的 Linux 文件系统中创建环境：
