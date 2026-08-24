@@ -31,6 +31,10 @@
 
 | 操作 | 在哪里执行 | 权限 |
 |---|---|---|
+| 检查部署是否被24小时定时器销毁 | WSL终端 | 普通用户 |
+| 重新安装程序、恢复柜台配置 | WSL终端 | 命令使用 `sudo` |
+| 取得机器码、签发新许可证 | WSL终端 | 普通用户，不使用 `sudo` |
+| 激活新许可证 | WSL终端 | 命令使用 `sudo` |
 | Windows首次配置或重新应用NTP | Windows PowerShell | **必须以管理员身份运行** |
 | 生成Windows JSON报告 | Windows PowerShell | **必须以管理员身份运行**，否则可能无法读取W32Time活动源并返回FAIL |
 | Linux首次配置或重新应用chrony | WSL终端 | 普通登录后使用 `sudo` |
@@ -39,6 +43,83 @@
 | 运行行情测试 | WSL/Linux终端 | 普通用户，不使用 `sudo` |
 
 Windows管理员窗口的打开方法：在开始菜单搜索“PowerShell”，右键选择“以管理员身份运行”，看到用户账户控制提示后选择“是”。不要把PowerShell命令粘贴到WSL，也不要把Linux命令粘贴到PowerShell。
+
+### 24小时到期后的重新安装与激活
+
+许可证从首次激活开始默认只有效24小时。到期后 `/opt/ydtrader` 通常会被销毁；Windows主项目、`~/projects/yd_trader`源码检查副本、构建结果和发证私钥不会被销毁。旧许可证不能重新开始计时。
+
+**【普通WSL终端｜不要sudo】先检查部署是否还存在：**
+
+```bash
+if [ -x /opt/ydtrader/ydtrader ]; then
+  echo "部署仍存在"
+else
+  echo "部署已销毁，需要重新安装和激活"
+fi
+```
+
+如果输出“部署仍存在”，不要覆盖安装，也不要手工删除 `/opt/ydtrader` 或 `/var/lib/ydtrader`。先检查许可证和timer状态；如果已经到期但销毁没有完成，按照 `README_本机激活与完整运行.md` 排查，不要重复执行旧许可证的 `activate`。
+
+如果输出“部署已销毁”，继续以下步骤。
+
+**【WSL终端｜命令内含sudo】重新安装程序：**
+
+```bash
+cd ~/projects/yd_trader
+sudo result/ydtrader-linux-x86_64/install/install_linux.sh
+```
+
+如果提示安装脚本不存在，先执行 `ls -l ~/projects/yd_trader/result`，不要从Windows目录直接运行Linux安装包。
+
+**【WSL终端｜命令内含sudo】恢复本机真实柜台配置：**
+
+```bash
+sudo install -o root -g "$(id -gn)" -m 0640 \
+  "/mnt/c/Users/Hello/Documents/基础环境配置/outputs/share/share/yd_trader/config/account.json" \
+  /opt/ydtrader/config/account.json
+
+sudo install -o root -g "$(id -gn)" -m 0640 \
+  "/mnt/c/Users/Hello/Documents/基础环境配置/outputs/share/share/yd_trader/config/ydClient.ini" \
+  /opt/ydtrader/config/ydClient.ini
+```
+
+**【普通WSL终端｜不要sudo】检查文件并签发全新的24小时许可证：**
+
+```bash
+ls -l /opt/ydtrader/ydtrader \
+  /opt/ydtrader/config/account.json \
+  /opt/ydtrader/config/ydClient.ini
+
+cd ~/projects/yd_trader
+MACHINE_CODE=$(/opt/ydtrader/ydtrader machine-code)
+LICENSE_FILE="$HOME/.ydtrader-issuer/local-$(date -u +%Y%m%dT%H%M%SZ).license.json"
+
+.venv/bin/python build_tools/issue_license.py \
+  --private-key ~/.ydtrader-issuer/issuer.private.pem \
+  --machine-code "$MACHINE_CODE" \
+  --features order monitor marketdata \
+  --ttl-hours 24 \
+  --output "$LICENSE_FILE"
+
+echo "新许可证：$LICENSE_FILE"
+```
+
+签发工具会依次要求输入“发证私钥密码、新业务运行密码、再次输入新业务运行密码”。这些都不是Linux的 `sudo` 密码。密码输入时屏幕不显示字符是正常现象；不要把密码写进命令行。之前在普通Shell中明文显示过的业务密码不得继续用于leader交付。
+
+**【同一个WSL终端｜命令内含sudo】立即激活刚签发的许可证：**
+
+```bash
+sudo /opt/ydtrader/ydtrader activate --license "$LICENSE_FILE"
+```
+
+这里可能先要求Linux用户的 `sudo` 密码，然后程序显示 `运行密码:`；此时输入刚设置的新业务运行密码。看到“激活成功”和新的绝对UTC到期时间后检查timer：
+
+```bash
+systemctl status ydtrader-expiry.timer --no-pager
+systemctl list-timers ydtrader-expiry.timer --all --no-pager
+```
+
+重新安装不会代替授时验收。完成激活后继续下面的Windows/Linux报告流程，最终必须重新得到 `RESULT: PASS`，才能接行情。
 
 **【管理员 Windows PowerShell｜必须】第一次配置Windows：**
 
@@ -102,6 +183,40 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\compare_time_repor
 ## 三、leader 原生 Linux
 
 leader 原生 Linux 不启用 WSL 兼容逻辑。先复制生产模板为本次正式配置，并填入中金所官方 NTP 地址；Windows 必须使用内容完全相同的配置。
+
+### leader到期后的部署恢复与权限
+
+| 操作 | 在哪里执行 | 权限 |
+|---|---|---|
+| 解压交付包、检查机器码 | leader Linux | 普通用户 |
+| 安装程序、恢复配置、激活许可证 | leader Linux | 对应命令使用 `sudo` |
+| 签发新许可证 | 持有私钥的安全发证机 | 普通用户，不在leader上放私钥 |
+| 配置或检查Windows授时 | Windows PowerShell | **必须以管理员身份运行** |
+| 配置leader chrony | leader Linux | 命令使用 `sudo` |
+| 生成leader Linux报告 | leader Linux | 普通用户，不使用 `sudo` |
+
+如果 `/opt/ydtrader/ydtrader` 已被到期销毁，在leader普通Linux终端重新解压，然后用 `sudo` 安装：
+
+```bash
+tar -xzf ydtrader-linux-x86_64.tar.gz
+cd ydtrader-linux-x86_64
+sudo ./install/install_linux.sh
+
+sudo install -o root -g "$(id -gn)" -m 0640 \
+  ./account.json /opt/ydtrader/config/account.json
+sudo install -o root -g "$(id -gn)" -m 0640 \
+  ./ydClient.ini /opt/ydtrader/config/ydClient.ini
+
+/opt/ydtrader/ydtrader machine-code
+```
+
+leader只把最后输出的64位机器码交给发证人员，私钥不得复制到leader。发证人员在安全构建机使用 `build_tools/issue_license.py` 签发新的许可证ID和新业务运行密码；旧许可证不得复用。把新许可证安全传回leader后执行：
+
+```bash
+sudo /opt/ydtrader/ydtrader activate --license ./leader.license.json
+```
+
+激活成功后再继续下面的独立授时和报告比较。
 
 **【leader普通Linux终端；配置chrony的命令使用sudo】Linux首次配置：**
 
