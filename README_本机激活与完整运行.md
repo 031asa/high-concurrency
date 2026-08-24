@@ -58,11 +58,13 @@ sh -n build_tools/build_manylinux2014.sh \
 .venv/bin/python -m pytest -q
 ```
 
-必须看到全部测试通过。当前版本预期为：
+必须看到全部测试通过。测试数量会随功能增加而变化，不要按旧数量判断；当前交接版本的实测结果为：
 
 ```text
-10 passed
+19 passed, 7 skipped
 ```
+
+关键标准是没有 `failed` 或 `error`；以后新增测试时，手册中的数量可能再次变化。
 
 检查 WSL 中是否已经安装过：
 
