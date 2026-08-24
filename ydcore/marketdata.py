@@ -1,4 +1,5 @@
 import argparse
+import csv
 import logging
 import re
 import statistics
@@ -6,6 +7,7 @@ import sys
 import threading
 import time
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 
 from .trading import (
     PROJECT_ROOT,
@@ -101,6 +103,26 @@ def positive_float(value):
     return number
 
 
+def percentile(values, percentage):
+    """Return a linearly interpolated percentile without adding numpy/pandas."""
+    ordered = sorted(values)
+    if not ordered:
+        raise ValueError("percentile requires at least one value")
+    position = (len(ordered) - 1) * percentage
+    lower = int(position)
+    upper = min(lower + 1, len(ordered) - 1)
+    fraction = position - lower
+    return ordered[lower] + (ordered[upper] - ordered[lower]) * fraction
+
+
+def floor_time_bin(value, minutes):
+    return value.replace(
+        minute=(value.minute // minutes) * minutes,
+        second=0,
+        microsecond=0,
+    )
+
+
 class MarketDataListener:
     def __init__(self, max_quotes):
         self.max_quotes = max_quotes
@@ -110,6 +132,7 @@ class MarketDataListener:
         self.lock = threading.Lock()
         self.quote_count = 0
         self.differences_ms = []
+        self.received_times = []
 
     def login(self, error, max_order_ref, is_monitor):
         self.login_error = error
@@ -172,6 +195,7 @@ class MarketDataListener:
 
         with self.lock:
             self.differences_ms.append(difference_ms)
+            self.received_times.append(received_at)
 
         marketdata_logger.info(
             "MARKETDATA_TIMESTAMP sequence=%s instrument=%s tradingday=%s "
@@ -202,10 +226,11 @@ class MarketDataListener:
         if self.max_quotes > 0 and sequence >= self.max_quotes:
             self.quote_limit_event.set()
 
-    def summary(self, instrument):
+    def summary(self, instrument, bin_minutes=15, latency_bins_csv=None):
         with self.lock:
             quote_count = self.quote_count
             differences = list(self.differences_ms)
+            received_times = list(self.received_times)
         if not differences:
             error_logger.error(
                 "MARKETDATA_TIMESTAMP_SUMMARY instrument=%s quotes=%s comparable_quotes=0 "
@@ -285,7 +310,78 @@ class MarketDataListener:
             "说明: 该结果包含本机与行情源的时钟偏差，不等同于纯网络单向延迟。",
             flush=True,
         )
+        measured_times = received_times[1:]
+        if len(measured_times) == len(measured_differences):
+            rows = self._latency_bin_rows(
+                measured_times,
+                measured_differences,
+                bin_minutes,
+            )
+            self._print_latency_bins(rows, bin_minutes)
+            if latency_bins_csv:
+                self._write_latency_bins_csv(rows, latency_bins_csv)
         return True
+
+    @staticmethod
+    def _latency_bin_rows(received_times, differences, bin_minutes):
+        grouped = {}
+        for received_at, difference_ms in zip(received_times, differences):
+            time_bin = floor_time_bin(received_at, bin_minutes)
+            grouped.setdefault(time_bin, []).append(abs(difference_ms))
+        rows = []
+        for time_bin in sorted(grouped):
+            values = grouped[time_bin]
+            rows.append(
+                {
+                    "time_bin": time_bin,
+                    "count": len(values),
+                    "mean": statistics.fmean(values),
+                    "std": statistics.stdev(values) if len(values) > 1 else 0.0,
+                    "p95": percentile(values, 0.95),
+                    "max": max(values),
+                }
+            )
+        return rows
+
+    @staticmethod
+    def _print_latency_bins(rows, bin_minutes):
+        print(f"\n=== {bin_minutes}分钟行情时间差分箱（绝对值，ms） ===", flush=True)
+        print(
+            f"{'time_bin':<27} {'count':>8} {'mean':>12} "
+            f"{'std':>12} {'p95':>10} {'max':>10}",
+            flush=True,
+        )
+        for row in rows:
+            time_bin = row["time_bin"].isoformat(sep=" ", timespec="seconds")
+            print(
+                f"{time_bin:<27} {row['count']:>8d} {row['mean']:>12.6f} "
+                f"{row['std']:>12.6f} {row['p95']:>10.3f} {row['max']:>10.3f}",
+                flush=True,
+            )
+
+    @staticmethod
+    def _write_latency_bins_csv(rows, output_path):
+        path = Path(output_path).expanduser()
+        if not path.parent.is_dir():
+            raise ValueError(f"CSV output directory does not exist: {path.parent}")
+        with path.open("w", encoding="utf-8", newline="") as stream:
+            writer = csv.DictWriter(
+                stream,
+                fieldnames=("time_bin", "count", "mean", "std", "p95", "max"),
+            )
+            writer.writeheader()
+            for row in rows:
+                writer.writerow(
+                    {
+                        "time_bin": row["time_bin"].isoformat(),
+                        "count": row["count"],
+                        "mean": f"{row['mean']:.6f}",
+                        "std": f"{row['std']:.6f}",
+                        "p95": f"{row['p95']:.3f}",
+                        "max": f"{row['max']:.3f}",
+                    }
+                )
+        print(f"分箱CSV: {path}", flush=True)
 
 
 class MarketDataProbe:
@@ -361,6 +457,17 @@ def parse_args(argv=None):
         default=10,
         help="stop after this many callbacks; 0 waits for the full duration",
     )
+    parser.add_argument(
+        "--bin-minutes",
+        type=positive_int,
+        default=15,
+        choices=(1, 5, 10, 15, 30, 60),
+        help="time-bin width used by the latency statistics table",
+    )
+    parser.add_argument(
+        "--latency-bins-csv",
+        help="optional CSV path for the time-bin statistics",
+    )
     return parser.parse_args(argv)
 
 
@@ -386,11 +493,19 @@ def run(argv=None):
                 args.duration_seconds,
             )
             return 2
-        return 0 if probe.listener.summary(args.instrument) else 3
+        return 0 if probe.listener.summary(
+            args.instrument,
+            args.bin_minutes,
+            args.latency_bins_csv,
+        ) else 3
     except KeyboardInterrupt:
         marketdata_logger.info("MARKETDATA_TEST_STOP reason=OPERATOR_CTRL_C")
         if probe and probe.listener.quote_count > 0:
-            return 0 if probe.listener.summary(args.instrument) else 3
+            return 0 if probe.listener.summary(
+                args.instrument,
+                args.bin_minutes,
+                args.latency_bins_csv,
+            ) else 3
         return 130
     except Exception as exc:
         error_logger.exception(

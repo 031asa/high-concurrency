@@ -1,4 +1,9 @@
+from datetime import datetime, timedelta, timezone
+
 from ydcore.marketdata import MarketDataListener
+
+
+CHINA_TIME = timezone(timedelta(hours=8))
 
 
 def test_summary_excludes_first_quote_and_prints_average_and_median(capsys, caplog):
@@ -51,3 +56,31 @@ def test_summary_fails_cleanly_when_only_initial_quote_is_comparable(capsys, cap
     assert "用于统计: 0 条" in output
     assert "剔除首条后没有可统计的行情时间戳" in output
     assert "reason=NO_TIMESTAMP_AFTER_INITIAL_QUOTE" in caplog.text
+
+
+def test_summary_prints_15_minute_bins_and_writes_csv(tmp_path, capsys):
+    listener = MarketDataListener(max_quotes=10)
+    listener.quote_count = 5
+    listener.differences_ms = [-10, 20, -30, 40, 50]
+    listener.received_times = [
+        datetime(2026, 8, 21, 9, 44, 59, tzinfo=CHINA_TIME),
+        datetime(2026, 8, 21, 9, 45, 1, tzinfo=CHINA_TIME),
+        datetime(2026, 8, 21, 9, 46, 1, tzinfo=CHINA_TIME),
+        datetime(2026, 8, 21, 9, 59, 59, tzinfo=CHINA_TIME),
+        datetime(2026, 8, 21, 10, 0, 0, tzinfo=CHINA_TIME),
+    ]
+    output_csv = tmp_path / "latency-bins.csv"
+
+    assert listener.summary("IC2609", 15, output_csv) is True
+
+    output = capsys.readouterr().out
+    assert "=== 15分钟行情时间差分箱（绝对值，ms） ===" in output
+    assert "time_bin" in output
+    assert "2026-08-21 09:45:00+08:00" in output
+    assert "2026-08-21 10:00:00+08:00" in output
+    assert "30.000000" in output
+    assert "10.000000" in output
+    assert "39.000" in output
+    csv_text = output_csv.read_text(encoding="utf-8")
+    assert "time_bin,count,mean,std,p95,max" in csv_text
+    assert "2026-08-21T09:45:00+08:00,3,30.000000,10.000000,39.000,40.000" in csv_text
