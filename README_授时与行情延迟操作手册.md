@@ -158,7 +158,11 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\windows_time_sync.
   -Output .\windows-time.json
 ```
 
-`-Apply` 会把 W32Time 配到配置文件中的 NTP，并固定 `UpdateInterval=100`。只有实测偏差超过50 ms时才临时执行一次立即校正，`finally` 会恢复原跳时阈值。
+`-Apply` 会把 W32Time 配到配置文件中的 NTP，并应用微软高精度参数：`MinPollInterval=6`、`MaxPollInterval=6`（固定64秒轮询）、`UpdateInterval=100`、`FrequencyCorrectRate=2`，同时把服务设为自动启动。只有实测偏差超过50 ms时才临时执行一次立即校正，`finally` 会恢复原跳时阈值。配置后脚本会等待约70秒，让强制样本和第一次正常轮询完成，因此窗口暂时没有返回提示不代表卡死。
+
+Windows报告默认采集11次高精度NTP样本，按往返时间保留最快的75%，用中位数作为 `authority_minus_local_ms`，同时输出过滤后平均数、RTT和不确定度。该处理可以降低VPN排队尖峰对报告的影响，但不能消除公网路径的固定上下行不对称。
+
+从旧版本升级到本版本后，即使Windows以前配置过NTP，也必须在管理员PowerShell重新执行一次带 `-Apply` 的命令。报告要求至少7个有效样本，并会核对上述高精度参数和服务启动方式；没有真正应用成功时会明确返回 `RESULT: FAIL`。
 
 **【WSL终端｜命令内含sudo】第一次配置Linux：**
 

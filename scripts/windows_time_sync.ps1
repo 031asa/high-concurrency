@@ -9,6 +9,24 @@ Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
 $Invariant = [Globalization.CultureInfo]::InvariantCulture
 
+if (-not ("YdTrader.PreciseClock" -as [type])) {
+    Add-Type -TypeDefinition @"
+using System.Runtime.InteropServices;
+namespace YdTrader {
+    public static class PreciseClock {
+        [DllImport("kernel32.dll")]
+        private static extern void GetSystemTimePreciseAsFileTime(out long fileTime);
+
+        public static double UnixMilliseconds() {
+            long fileTime;
+            GetSystemTimePreciseAsFileTime(out fileTime);
+            return (fileTime - 116444736000000000L) / 10000.0;
+        }
+    }
+}
+"@
+}
+
 function Test-IsAdministrator {
     $identity = [Security.Principal.WindowsIdentity]::GetCurrent()
     $principal = New-Object Security.Principal.WindowsPrincipal($identity)
@@ -68,6 +86,14 @@ function Get-NtpTimestamp([byte[]]$Packet, [int]$Offset) {
     return (($whole - 2208988800.0) + ($fraction / 4294967296.0)) * 1000.0
 }
 
+function Get-Median([double[]]$Values) {
+    if ($Values.Count -eq 0) { return 0.0 }
+    [double[]]$ordered = @($Values | Sort-Object)
+    $middle = [int][math]::Floor($ordered.Count / 2)
+    if (($ordered.Count % 2) -eq 1) { return [double]$ordered[$middle] }
+    return ([double]$ordered[$middle - 1] + [double]$ordered[$middle]) / 2.0
+}
+
 function Get-NtpSample([string]$Server) {
     $packet = New-Object byte[] 48
     $packet[0] = 0x1b # Leap=0, NTPv3, client mode.
@@ -75,12 +101,12 @@ function Get-NtpSample([string]$Server) {
     try {
         $client.Client.ReceiveTimeout = 3000
         $client.Connect($Server, 123)
-        $t1 = [double][DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()
+        $t1 = [YdTrader.PreciseClock]::UnixMilliseconds()
         Set-NtpTimestamp $packet 40 $t1
         [void]$client.Send($packet, $packet.Length)
         $remote = New-Object Net.IPEndPoint([Net.IPAddress]::Any, 0)
         [byte[]]$response = $client.Receive([ref]$remote)
-        $t4 = [double][DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()
+        $t4 = [YdTrader.PreciseClock]::UnixMilliseconds()
     }
     finally { $client.Close() }
     if ($response.Length -lt 48) { throw "$Server returned a short NTP packet." }
@@ -101,9 +127,8 @@ function Get-NtpSample([string]$Server) {
     }
 }
 
-function Get-NtpSamples([string[]]$Servers, [int]$SamplesPerServer = 3) {
-    $samples = New-Object System.Collections.Generic.List[double]
-    $delays = New-Object System.Collections.Generic.List[double]
+function Get-NtpSamples([string[]]$Servers, [int]$SamplesPerServer = 11) {
+    $samples = New-Object System.Collections.Generic.List[object]
     $usedServers = New-Object System.Collections.Generic.List[string]
     $errors = New-Object System.Collections.Generic.List[string]
     foreach ($server in $Servers) {
@@ -111,22 +136,38 @@ function Get-NtpSamples([string[]]$Servers, [int]$SamplesPerServer = 3) {
         for ($sampleIndex = 0; $sampleIndex -lt $SamplesPerServer; $sampleIndex++) {
             try {
                 $sample = Get-NtpSample $server
-                $samples.Add([double]$sample.OffsetMs)
-                $delays.Add([double]$sample.RoundTripMs)
+                $samples.Add($sample)
             }
             catch { $errors.Add("$server sample failed: $($_.Exception.Message)") }
+            if ($sampleIndex -lt ($SamplesPerServer - 1)) { Start-Sleep -Milliseconds 100 }
         }
         if ($samples.Count -gt $before) { $usedServers.Add($server) }
     }
-    $average = 0.0
+    $median = 0.0
+    $mean = 0.0
     $maximum = 0.0
     $uncertainty = 0.0
+    $medianRoundTrip = 0.0
+    $filtered = @()
     if ($samples.Count -gt 0) {
-        $average = [double](($samples | Measure-Object -Average).Average)
-        $maximum = [double](($samples | ForEach-Object { [math]::Abs($_) } | Measure-Object -Maximum).Maximum)
-        $uncertainty = [double](($delays | Measure-Object -Average).Average) / 2.0
+        # Large RTT samples are the ones most exposed to queueing and asymmetric VPN paths.
+        # Keep the fastest 75%, then use the median offset instead of a fragile arithmetic mean.
+        $keepCount = [math]::Max(1, [int][math]::Ceiling($samples.Count * 0.75))
+        $filtered = @($samples | Sort-Object RoundTripMs | Select-Object -First $keepCount)
+        [double[]]$offsets = @($filtered | ForEach-Object { [double]$_.OffsetMs })
+        [double[]]$roundTrips = @($filtered | ForEach-Object { [double]$_.RoundTripMs })
+        $median = Get-Median $offsets
+        $mean = [double](($offsets | Measure-Object -Average).Average)
+        $maximum = [double](($offsets | ForEach-Object { [math]::Abs($_) } | Measure-Object -Maximum).Maximum)
+        $medianRoundTrip = Get-Median $roundTrips
+        [double[]]$absoluteDeviations = @($offsets | ForEach-Object { [math]::Abs($_ - $median) })
+        $uncertainty = ($medianRoundTrip / 2.0) + (Get-Median $absoluteDeviations)
     }
-    return [pscustomobject]@{ Values = @($samples); Average = $average; Maximum = $maximum; Uncertainty = $uncertainty; Servers = @($usedServers); Errors = @($errors) }
+    return [pscustomobject]@{
+        Values = $samples.ToArray(); FilteredValues = @($filtered); Average = $median; Median = $median; Mean = $mean
+        Maximum = $maximum; Uncertainty = $uncertainty; MedianRoundTrip = $medianRoundTrip
+        DiscardedCount = ($samples.Count - $filtered.Count); Servers = $usedServers.ToArray(); Errors = $errors.ToArray()
+    }
 }
 
 function Invoke-TimeConfiguration($Settings, $InitialSamples) {
@@ -138,9 +179,16 @@ function Invoke-TimeConfiguration($Settings, $InitialSamples) {
     & w32tm.exe /config "/manualpeerlist:$peers" /syncfromflags:manual /reliable:no /update
     if ($LASTEXITCODE -ne 0) { throw "w32tm peer configuration failed with exit code $LASTEXITCODE." }
     $registry = "HKLM:\SYSTEM\CurrentControlSet\Services\W32Time\Config"
+    $ntpClientRegistry = "HKLM:\SYSTEM\CurrentControlSet\Services\W32Time\TimeProviders\NtpClient"
     $originalStepLimit = [int](Get-ItemProperty -LiteralPath $registry).MaxAllowedPhaseOffset
     $needsStep = $InitialSamples.Maximum -gt $Settings.MaxOffsetMs
+    # Microsoft high-accuracy profile: poll every 64 seconds and discipline the
+    # clock more aggressively. Keep 0x8 client mode; Min/MaxPollInterval govern it.
+    Set-ItemProperty -LiteralPath $registry -Name MinPollInterval -Value 6
+    Set-ItemProperty -LiteralPath $registry -Name MaxPollInterval -Value 6
     Set-ItemProperty -LiteralPath $registry -Name UpdateInterval -Value 100
+    Set-ItemProperty -LiteralPath $registry -Name FrequencyCorrectRate -Value 2
+    Set-ItemProperty -LiteralPath $ntpClientRegistry -Name SpecialPollInterval -Value 64
     if ($needsStep) {
         Write-Output ("Offset exceeds {0} ms; requesting one immediate correction." -f $Settings.MaxOffsetMs)
         Set-ItemProperty -LiteralPath $registry -Name MaxAllowedPhaseOffset -Value 0
@@ -154,13 +202,32 @@ function Invoke-TimeConfiguration($Settings, $InitialSamples) {
             Start-Sleep -Seconds 3
         }
         if (-not $ok) { throw "w32tm resync failed after three attempts." }
-        Start-Sleep -Seconds 5
+        # One forced sample plus one normal 64-second poll gives W32Time time to
+        # start estimating frequency before the post-apply report is generated.
+        Write-Output "W32Time high-accuracy profile applied; waiting 70 seconds for stabilization..."
+        Start-Sleep -Seconds 70
     }
     finally {
         if ($needsStep) {
             Set-ItemProperty -LiteralPath $registry -Name MaxAllowedPhaseOffset -Value $originalStepLimit
             & w32tm.exe /config /update | Out-Null
         }
+    }
+}
+
+function Get-W32TimeProfile {
+    $registry = "HKLM:\SYSTEM\CurrentControlSet\Services\W32Time\Config"
+    $ntpClientRegistry = "HKLM:\SYSTEM\CurrentControlSet\Services\W32Time\TimeProviders\NtpClient"
+    $config = Get-ItemProperty -LiteralPath $registry
+    $ntpClient = Get-ItemProperty -LiteralPath $ntpClientRegistry
+    $service = Get-Service -Name W32Time
+    return [pscustomobject]@{
+        MinPollInterval = [int]$config.MinPollInterval
+        MaxPollInterval = [int]$config.MaxPollInterval
+        UpdateInterval = [int]$config.UpdateInterval
+        FrequencyCorrectRate = [int]$config.FrequencyCorrectRate
+        SpecialPollInterval = [int]$ntpClient.SpecialPollInterval
+        ServiceStartType = [string]$service.StartType
     }
 }
 
@@ -179,6 +246,7 @@ try {
     $initial = Get-NtpSamples $settings.Servers
     if ($Apply) { Invoke-TimeConfiguration $settings $initial }
     $samples = if ($Apply) { Get-NtpSamples $settings.Servers } else { $initial }
+    $w32timeProfile = Get-W32TimeProfile
     $sourceRaw = & w32tm.exe /query /source 2>&1
     $activeSource = if ($LASTEXITCODE -eq 0) { (($sourceRaw | Out-String).Trim()) } else { "UNAVAILABLE" }
     $resolved = New-Object System.Collections.Generic.List[string]
@@ -186,20 +254,37 @@ try {
         try { [Net.Dns]::GetHostAddresses($server) | ForEach-Object { if (-not $resolved.Contains($_.IPAddressToString)) { $resolved.Add($_.IPAddressToString) } } } catch { }
     }
     $failures = New-Object System.Collections.Generic.List[string]
-    if ($samples.Values.Count -eq 0) { $failures.Add("no valid NTP sample") }
+    if ($samples.Values.Count -lt 7) { $failures.Add("fewer than 7 valid NTP samples") }
     if ($samples.Maximum -gt $settings.MaxOffsetMs) { $failures.Add("Windows/authority offset exceeds $($settings.MaxOffsetMs) ms") }
     if ($activeSource -match 'Local CMOS Clock|本地\s*CMOS\s*时钟') { $failures.Add("W32Time is using the local CMOS clock") }
     $sourceName = $activeSource -replace ',0x[0-9A-Fa-f]+$', ''
     $activeAllowed = ($settings.Servers -contains $sourceName) -or ($resolved -contains $sourceName)
     if (-not $activeAllowed) { $failures.Add("W32Time active source is not the configured authority") }
+    $profileMatches = $w32timeProfile.MinPollInterval -eq 6 -and
+        $w32timeProfile.MaxPollInterval -eq 6 -and
+        $w32timeProfile.UpdateInterval -eq 100 -and
+        $w32timeProfile.FrequencyCorrectRate -eq 2 -and
+        $w32timeProfile.SpecialPollInterval -eq 64 -and
+        $w32timeProfile.ServiceStartType -eq "Automatic"
+    if (-not $profileMatches) { $failures.Add("W32Time high-accuracy profile is not applied; rerun with -Apply") }
     $report = [ordered]@{
         schema = 1; platform = "windows"; hostname = $env:COMPUTERNAME
         generated_at_utc = [DateTime]::UtcNow.ToString("yyyy-MM-ddTHH:mm:ss.fffZ", $Invariant)
         authority = [ordered]@{ name = $settings.Name; url = $settings.Url; ntp_servers = @($settings.Servers); environment = $settings.Environment }
         selected_source = $activeSource; resolved_ips = @($resolved)
-        authority_minus_local_ms = [math]::Round($samples.Average, 3); max_abs_sample_ms = [math]::Round($samples.Maximum, 3)
-        uncertainty_ms = [math]::Round($samples.Uncertainty, 3); max_offset_ms = $settings.MaxOffsetMs; max_cross_difference_ms = $settings.MaxCrossDifferenceMs
-        sample_count = $samples.Values.Count; pass = ($failures.Count -eq 0); failure = ($failures -join "; ")
+        authority_minus_local_ms = [math]::Round($samples.Median, 3); mean_offset_ms = [math]::Round($samples.Mean, 3)
+        max_abs_sample_ms = [math]::Round($samples.Maximum, 3); uncertainty_ms = [math]::Round($samples.Uncertainty, 3)
+        median_round_trip_ms = [math]::Round($samples.MedianRoundTrip, 3)
+        max_offset_ms = $settings.MaxOffsetMs; max_cross_difference_ms = $settings.MaxCrossDifferenceMs
+        sample_count = $samples.Values.Count; filtered_sample_count = $samples.FilteredValues.Count
+        discarded_high_rtt_samples = $samples.DiscardedCount; estimator = "median_of_fastest_75_percent"
+        sample_errors = @($samples.Errors)
+        w32time_profile = [ordered]@{
+            min_poll_interval = $w32timeProfile.MinPollInterval; max_poll_interval = $w32timeProfile.MaxPollInterval
+            update_interval = $w32timeProfile.UpdateInterval; frequency_correct_rate = $w32timeProfile.FrequencyCorrectRate
+            special_poll_interval = $w32timeProfile.SpecialPollInterval; service_start_type = $w32timeProfile.ServiceStartType
+        }
+        pass = ($failures.Count -eq 0); failure = ($failures -join "; ")
     }
     Write-Utf8Json $report $Output
     Write-Output "=== Windows time authority report ==="
@@ -207,7 +292,9 @@ try {
     Write-Output "Website   : $($settings.Url)"
     Write-Output "NTP       : $($settings.Servers -join ', ')"
     Write-Output "Active    : $activeSource"
-    Write-Output ("Offset    : {0:+0.000;-0.000;0.000} ms (authority minus Windows)" -f $samples.Average)
+    Write-Output ("Median    : {0:+0.000;-0.000;0.000} ms (authority minus Windows)" -f $samples.Median)
+    Write-Output ("Mean      : {0:+0.000;-0.000;0.000} ms (filtered samples)" -f $samples.Mean)
+    Write-Output ("RTT       : {0:0.000} ms median; kept {1}/{2} samples" -f $samples.MedianRoundTrip, $samples.FilteredValues.Count, $samples.Values.Count)
     Write-Output "Report    : $Output"
     if ($failures.Count -gt 0) {
         Write-Output "RESULT: FAIL"

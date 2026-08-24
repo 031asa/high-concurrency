@@ -102,3 +102,20 @@ def test_south_china_fallback_is_not_labeled_as_production_or_cffex():
 
 def test_old_phc_setup_script_is_removed():
     assert not (ROOT / "scripts" / "setup_wsl_chrony_windows_sync.sh").exists()
+
+
+def test_windows_sync_uses_high_accuracy_profile_and_robust_samples():
+    script = (ROOT / "scripts" / "windows_time_sync.ps1").read_text(encoding="utf-8")
+    for setting in (
+        'Name MinPollInterval -Value 6',
+        'Name MaxPollInterval -Value 6',
+        'Name UpdateInterval -Value 100',
+        'Name FrequencyCorrectRate -Value 2',
+        'Name SpecialPollInterval -Value 64',
+        '[int]$SamplesPerServer = 11',
+        'GetSystemTimePreciseAsFileTime',
+        'median_of_fastest_75_percent',
+        'fewer than 7 valid NTP samples',
+        'W32Time high-accuracy profile is not applied',
+    ):
+        assert setting in script
