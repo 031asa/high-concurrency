@@ -14,6 +14,7 @@ function New-Report([string]$Platform, [double]$Offset) {
         }
         authority_minus_local_ms = $Offset; max_abs_sample_ms = [math]::Abs($Offset)
         max_offset_ms = 50; max_cross_difference_ms = 50; pass = $true; failure = ""
+        sample_errors = @("中文网络超时样本")
     }
 }
 
@@ -23,8 +24,9 @@ function Invoke-Case([string]$Name, [scriptblock]$Mutation, [int]$Expected) {
     & $Mutation $windows $linux
     $windowsPath = Join-Path $testRoot "$Name-windows.json"
     $linuxPath = Join-Path $testRoot "$Name-linux.json"
-    $windows | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath $windowsPath -Encoding UTF8
-    $linux | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath $linuxPath -Encoding UTF8
+    $utf8 = New-Object Text.UTF8Encoding($false)
+    [IO.File]::WriteAllText($windowsPath, ($windows | ConvertTo-Json -Depth 5), $utf8)
+    [IO.File]::WriteAllText($linuxPath, ($linux | ConvertTo-Json -Depth 5), $utf8)
     $result = & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $comparator -WindowsReport $windowsPath -LinuxReport $linuxPath 2>&1
     if ($LASTEXITCODE -ne $Expected) { throw "$Name expected $Expected, got $LASTEXITCODE`n$($result -join "`n")" }
     Write-Output "PASS: $Name"

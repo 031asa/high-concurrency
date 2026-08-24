@@ -11,7 +11,12 @@ $Invariant = [Globalization.CultureInfo]::InvariantCulture
 
 function Read-Report([string]$Path) {
     if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) { throw "Report not found: $Path" }
-    return (Get-Content -LiteralPath $Path -Raw | ConvertFrom-Json)
+    $full = (Resolve-Path -LiteralPath $Path).Path
+    # Windows PowerShell 5.1 treats BOM-less UTF-8 as the active ANSI code page
+    # when Get-Content has no encoding. Reports are deliberately UTF-8 without
+    # BOM, so read them explicitly to preserve non-ASCII error messages.
+    $utf8 = New-Object Text.UTF8Encoding($false, $true)
+    return ([IO.File]::ReadAllText($full, $utf8) | ConvertFrom-Json)
 }
 function Canonical-List($Items) { return (@($Items | ForEach-Object { [string]$_ } | Sort-Object) -join "`n") }
 
