@@ -1,6 +1,7 @@
 import argparse
 import logging
 import re
+import statistics
 import sys
 import threading
 import time
@@ -222,24 +223,51 @@ class MarketDataListener:
             )
             return False
 
-        absolute_differences = [abs(value) for value in differences]
-        average_ms = sum(differences) / len(differences)
+        measured_differences = differences[1:]
+        if not measured_differences:
+            error_logger.error(
+                "MARKETDATA_TIMESTAMP_SUMMARY instrument=%s quotes=%s comparable_quotes=%s "
+                "excluded_initial_quotes=1 measured_quotes=0 result=FAILED "
+                "reason=NO_TIMESTAMP_AFTER_INITIAL_QUOTE",
+                instrument,
+                quote_count,
+                len(differences),
+            )
+            print(
+                "\n=== 行情延迟测试汇总 ===\n"
+                f"合约: {instrument}\n"
+                f"收到行情: {quote_count} 条\n"
+                f"有效时间戳: {len(differences)} 条\n"
+                "统计口径: 已剔除首条有效行情\n"
+                "用于统计: 0 条\n"
+                "结果: 失败（剔除首条后没有可统计的行情时间戳）",
+                flush=True,
+            )
+            return False
+
+        absolute_differences = [abs(value) for value in measured_differences]
+        average_ms = sum(measured_differences) / len(measured_differences)
         average_absolute_ms = sum(absolute_differences) / len(absolute_differences)
+        median_absolute_ms = statistics.median(absolute_differences)
         marketdata_logger.info(
             "MARKETDATA_TIMESTAMP_SUMMARY instrument=%s quotes=%s comparable_quotes=%s "
+            "excluded_initial_quotes=1 measured_quotes=%s "
             "has_difference=%s min_difference_ms=%s average_difference_ms=%.3f "
             "max_difference_ms=%s min_absolute_difference_ms=%s "
-            "average_absolute_difference_ms=%.3f max_absolute_difference_ms=%s "
+            "average_absolute_difference_ms=%.3f median_absolute_difference_ms=%.3f "
+            "max_absolute_difference_ms=%s "
             "result=SUCCESS",
             instrument,
             quote_count,
             len(differences),
-            "YES" if any(value != 0 for value in differences) else "NO",
-            min(differences),
+            len(measured_differences),
+            "YES" if any(value != 0 for value in measured_differences) else "NO",
+            min(measured_differences),
             average_ms,
-            max(differences),
+            max(measured_differences),
             min(absolute_differences),
             average_absolute_ms,
+            median_absolute_ms,
             max(absolute_differences),
         )
         print(
@@ -247,7 +275,10 @@ class MarketDataListener:
             f"合约: {instrument}\n"
             f"收到行情: {quote_count} 条\n"
             f"有效时间戳: {len(differences)} 条\n"
-            f"平均延迟（绝对值）: {average_absolute_ms:.3f} ms\n"
+            "统计口径: 已剔除首条有效行情\n"
+            f"用于统计: {len(measured_differences)} 条\n"
+            f"平均延迟（绝对值，剔除首条后）: {average_absolute_ms:.3f} ms\n"
+            f"中位延迟（绝对值，剔除首条后）: {median_absolute_ms:.3f} ms\n"
             f"最小延迟（绝对值）: {min(absolute_differences)} ms\n"
             f"最大延迟（绝对值）: {max(absolute_differences)} ms\n"
             f"平均时间差（本机减行情）: {average_ms:+.3f} ms\n"
