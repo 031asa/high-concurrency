@@ -6,12 +6,13 @@
 
 广州及华南开发联调优先使用 `config/time_authority.tencent-south-china-fallback.conf`：
 
-- 授时中心：Tencent Cloud Public NTP - South China fallback
-- NTP：`ntp4.tencent.com`、`ntp5.tencent.com`、`ntp2.tencent.com`
+- 授时中心：Tencent Cloud Public NTP - pinned leader endpoint
+- NTP：固定IP `106.55.184.199`（当前对应腾讯公网NTP `ntp.tencent.com`）
+- 固定IP用于避免VPN改变DNS或地域解析，交付前必须根据腾讯官方NTP文档重新确认；它不是中金所授时源。
 - 官方文档：[腾讯云 NTP 服务概述](https://cloud.tencent.com/document/product/213/30392)
 - 环境：`test`
 
-这三个域名是腾讯云官方公网源；在当前华南网络的5次UDP实测中，往返约7–16 ms。公网域名可能因运营商和DNS调度到不同节点，因此它表示“当前网络低延迟的华南替代源”，不保证固定在某一广州机房。Cloudflare 的 `config/time_authority.cloudflare-test.conf` 仅保留作跨运营商故障对照，不再作为华南默认源。
+`106.55.184.199` 是本次与leader统一的腾讯公网NTP端点，当前也由腾讯官方域名 `ntp.tencent.com` 和旧域名 `time1.cloud.tencent.com` 解析得到。固定字面IP只能消除两端DNS解析差异，不能绕过VPN、保证公网路径对称或承诺5ms精度；交付前必须重新确认该IP仍属于腾讯官方NTP。Cloudflare 的 `config/time_authority.cloudflare-test.conf` 仅保留作跨运营商故障对照，不再作为华南默认源。
 
 正式交付使用 `config/time_authority.cffex.example.conf`：
 
@@ -36,6 +37,7 @@
 | 取得机器码、签发新许可证 | WSL终端 | 普通用户，不使用 `sudo` |
 | 激活新许可证 | WSL终端 | 命令使用 `sudo` |
 | Windows首次配置或重新应用NTP | Windows PowerShell | **必须以管理员身份运行** |
+| 配置或重启WSL mirrored网络 | Windows PowerShell | 普通权限即可，会关闭全部WSL会话 |
 | 生成Windows JSON报告 | Windows PowerShell | **必须以管理员身份运行**，否则可能无法读取W32Time活动源并返回FAIL |
 | Linux首次配置或重新应用chrony | WSL终端 | 普通登录后使用 `sudo` |
 | 生成Linux JSON报告 | WSL终端 | 普通用户，不使用 `sudo` |
@@ -43,6 +45,31 @@
 | 运行行情测试 | WSL/Linux终端 | 普通用户，不使用 `sudo` |
 
 Windows管理员窗口的打开方法：在开始菜单搜索“PowerShell”，右键选择“以管理员身份运行”，看到用户账户控制提示后选择“是”。不要把PowerShell命令粘贴到WSL，也不要把Linux命令粘贴到PowerShell。
+
+### VPN开启时使用WSL mirrored网络
+
+当前开发机需要保持VPN以便沟通或访问其他服务时，在Windows用户目录 `%USERPROFILE%\.wslconfig` 使用以下配置：
+
+```ini
+[wsl2]
+networkingMode=mirrored
+dnsTunneling=true
+autoProxy=true
+```
+
+修改后在**普通Windows PowerShell**执行：
+
+```powershell
+wsl --shutdown
+```
+
+该命令会立即关闭全部WSL终端和WSL内进程。重新打开Ubuntu后验证：
+
+```bash
+wslinfo --networking-mode
+```
+
+必须输出 `mirrored`。镜像网络用于改善WSL与VPN的兼容性，不代表NTP流量会绕过VPN；固定IP `106.55.184.199` 仍可能经过VPN。切换网络模式后的第一次chrony校时必须保持同一个WSL终端持续打开至少2分钟，避免WSL反复启动导致时钟模型无法收敛。
 
 ### 24小时到期后的重新安装与激活
 

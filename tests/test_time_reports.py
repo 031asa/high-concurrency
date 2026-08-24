@@ -95,7 +95,7 @@ def test_production_template_has_no_public_default():
 def test_south_china_fallback_is_not_labeled_as_production_or_cffex():
     fallback = (ROOT / "config" / "time_authority.tencent-south-china-fallback.conf").read_text(encoding="utf-8")
     assert "environment=test" in fallback
-    assert "ntp4.tencent.com ntp5.tencent.com ntp2.tencent.com" in fallback
+    assert "ntp_servers=106.55.184.199" in fallback
     assert "authority_name=Tencent Cloud Public NTP" in fallback
     assert "environment=production" not in fallback
 

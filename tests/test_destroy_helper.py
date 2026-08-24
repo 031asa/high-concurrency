@@ -41,5 +41,5 @@ def test_release_time_support_contains_production_assets_only():
         assert fallback.is_file()
         fallback_text = fallback.read_text(encoding="utf-8")
         assert "environment=test" in fallback_text
-        assert "ntp4.tencent.com ntp5.tencent.com ntp2.tencent.com" in fallback_text
+        assert "ntp_servers=106.55.184.199" in fallback_text
         assert not list(release.rglob("*cloudflare*"))
