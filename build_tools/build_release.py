@@ -59,6 +59,10 @@ def copy_release_support_files(release):
         PROJECT_ROOT / "config" / "time_authority.cffex.example.conf",
         config / "time_authority.cffex.example.conf",
     )
+    shutil.copy2(
+        PROJECT_ROOT / "config" / "time_authority.tencent-south-china-fallback.conf",
+        config / "time_authority.tencent-south-china-fallback.conf",
+    )
 
 
 def main(argv=None):

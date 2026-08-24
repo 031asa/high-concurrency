@@ -45,32 +45,88 @@ function Read-TimeAuthorityConfig([string]$Path) {
     }
 }
 
+function Set-NtpTimestamp([byte[]]$Packet, [int]$Offset, [double]$UnixMilliseconds) {
+    $ntp = ($UnixMilliseconds / 1000.0) + 2208988800.0
+    [uint32]$whole = [math]::Floor($ntp)
+    [uint32]$fraction = [math]::Floor(($ntp - [math]::Floor($ntp)) * 4294967296.0)
+    for ($index = 0; $index -lt 4; $index++) {
+        $shift = 24 - (8 * $index)
+        $Packet[$Offset + $index] = [byte](($whole -shr $shift) -band 0xff)
+        $Packet[$Offset + 4 + $index] = [byte](($fraction -shr $shift) -band 0xff)
+    }
+}
+
+function Get-NtpTimestamp([byte[]]$Packet, [int]$Offset) {
+    $whole = ([double]$Packet[$Offset] * 16777216.0) +
+        ([double]$Packet[$Offset + 1] * 65536.0) +
+        ([double]$Packet[$Offset + 2] * 256.0) +
+        [double]$Packet[$Offset + 3]
+    $fraction = ([double]$Packet[$Offset + 4] * 16777216.0) +
+        ([double]$Packet[$Offset + 5] * 65536.0) +
+        ([double]$Packet[$Offset + 6] * 256.0) +
+        [double]$Packet[$Offset + 7]
+    return (($whole - 2208988800.0) + ($fraction / 4294967296.0)) * 1000.0
+}
+
+function Get-NtpSample([string]$Server) {
+    $packet = New-Object byte[] 48
+    $packet[0] = 0x1b # Leap=0, NTPv3, client mode.
+    $client = New-Object Net.Sockets.UdpClient
+    try {
+        $client.Client.ReceiveTimeout = 3000
+        $client.Connect($Server, 123)
+        $t1 = [double][DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()
+        Set-NtpTimestamp $packet 40 $t1
+        [void]$client.Send($packet, $packet.Length)
+        $remote = New-Object Net.IPEndPoint([Net.IPAddress]::Any, 0)
+        [byte[]]$response = $client.Receive([ref]$remote)
+        $t4 = [double][DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()
+    }
+    finally { $client.Close() }
+    if ($response.Length -lt 48) { throw "$Server returned a short NTP packet." }
+    $leap = ($response[0] -shr 6) -band 0x3
+    $mode = $response[0] -band 0x7
+    $stratum = [int]$response[1]
+    if ($leap -eq 3 -or $mode -notin @(4, 5) -or $stratum -lt 1 -or $stratum -gt 15) {
+        throw "$Server returned an unsynchronized or invalid NTP response."
+    }
+    $echoedT1 = Get-NtpTimestamp $response 24
+    if ([math]::Abs($echoedT1 - $t1) -gt 2.0) { throw "$Server returned an NTP response for a different request." }
+    $t2 = Get-NtpTimestamp $response 32
+    $t3 = Get-NtpTimestamp $response 40
+    if ($t2 -eq 0 -or $t3 -eq 0) { throw "$Server returned an empty NTP timestamp." }
+    return [pscustomobject]@{
+        OffsetMs = (($t2 - $t1) + ($t3 - $t4)) / 2.0
+        RoundTripMs = [math]::Max(0.0, ($t4 - $t1) - ($t3 - $t2))
+    }
+}
+
 function Get-NtpSamples([string[]]$Servers, [int]$SamplesPerServer = 3) {
     $samples = New-Object System.Collections.Generic.List[double]
+    $delays = New-Object System.Collections.Generic.List[double]
     $usedServers = New-Object System.Collections.Generic.List[string]
     $errors = New-Object System.Collections.Generic.List[string]
     foreach ($server in $Servers) {
-        $raw = & w32tm.exe /stripchart "/computer:$server" /dataonly "/samples:$SamplesPerServer" 2>&1
-        if ($LASTEXITCODE -ne 0) { $errors.Add("$server returned no usable NTP data"); continue }
         $before = $samples.Count
-        foreach ($line in $raw) {
-            if ($line -match '(?<sign>[+-])(?<seconds>\d+(?:[.,]\d+)?)s\s*$') {
-                $milliseconds = [double]::Parse($Matches.seconds.Replace(",", "."), $Invariant) * 1000.0
-                if ($Matches.sign -eq "-") { $milliseconds = -$milliseconds }
-                # W32Time phase/NTP offset is the correction from the local
-                # clock toward the target: authority-minus-local.
-                $samples.Add($milliseconds)
+        for ($sampleIndex = 0; $sampleIndex -lt $SamplesPerServer; $sampleIndex++) {
+            try {
+                $sample = Get-NtpSample $server
+                $samples.Add([double]$sample.OffsetMs)
+                $delays.Add([double]$sample.RoundTripMs)
             }
+            catch { $errors.Add("$server sample failed: $($_.Exception.Message)") }
         }
-        if ($samples.Count -gt $before) { $usedServers.Add($server) } else { $errors.Add("$server offsets could not be parsed") }
+        if ($samples.Count -gt $before) { $usedServers.Add($server) }
     }
     $average = 0.0
     $maximum = 0.0
+    $uncertainty = 0.0
     if ($samples.Count -gt 0) {
         $average = [double](($samples | Measure-Object -Average).Average)
         $maximum = [double](($samples | ForEach-Object { [math]::Abs($_) } | Measure-Object -Maximum).Maximum)
+        $uncertainty = [double](($delays | Measure-Object -Average).Average) / 2.0
     }
-    return [pscustomobject]@{ Values = @($samples); Average = $average; Maximum = $maximum; Servers = @($usedServers); Errors = @($errors) }
+    return [pscustomobject]@{ Values = @($samples); Average = $average; Maximum = $maximum; Uncertainty = $uncertainty; Servers = @($usedServers); Errors = @($errors) }
 }
 
 function Invoke-TimeConfiguration($Settings, $InitialSamples) {
@@ -142,7 +198,7 @@ try {
         authority = [ordered]@{ name = $settings.Name; url = $settings.Url; ntp_servers = @($settings.Servers); environment = $settings.Environment }
         selected_source = $activeSource; resolved_ips = @($resolved)
         authority_minus_local_ms = [math]::Round($samples.Average, 3); max_abs_sample_ms = [math]::Round($samples.Maximum, 3)
-        uncertainty_ms = 0.0; max_offset_ms = $settings.MaxOffsetMs; max_cross_difference_ms = $settings.MaxCrossDifferenceMs
+        uncertainty_ms = [math]::Round($samples.Uncertainty, 3); max_offset_ms = $settings.MaxOffsetMs; max_cross_difference_ms = $settings.MaxCrossDifferenceMs
         sample_count = $samples.Values.Count; pass = ($failures.Count -eq 0); failure = ($failures -join "; ")
     }
     Write-Utf8Json $report $Output

@@ -4,12 +4,14 @@
 
 ## 一、选择同一个授时中心
 
-开发联调只能使用 `config/time_authority.cloudflare-test.conf`：
+广州及华南开发联调优先使用 `config/time_authority.tencent-south-china-fallback.conf`：
 
-- 授时中心：Cloudflare Time Services
-- NTP：`time.cloudflare.com`
-- 官网：[Cloudflare Time Services](https://www.cloudflare.com/time/)
+- 授时中心：Tencent Cloud Public NTP - South China fallback
+- NTP：`ntp4.tencent.com`、`ntp5.tencent.com`、`ntp2.tencent.com`
+- 官方文档：[腾讯云 NTP 服务概述](https://cloud.tencent.com/document/product/213/30392)
 - 环境：`test`
+
+这三个域名是腾讯云官方公网源；在当前华南网络的5次UDP实测中，往返约7–16 ms。公网域名可能因运营商和DNS调度到不同节点，因此它表示“当前网络低延迟的华南替代源”，不保证固定在某一广州机房。Cloudflare 的 `config/time_authority.cloudflare-test.conf` 仅保留作跨运营商故障对照，不再作为华南默认源。
 
 正式交付使用 `config/time_authority.cffex.example.conf`：
 
@@ -17,7 +19,7 @@
 - 官网：[中国金融期货交易所](https://www.cffex.com.cn/)
 - 环境：`production`
 
-中金所生产模板故意没有真实 NTP 地址。生产验收前，必须从负责人或中金所官方技术文档取得 NTP 域名/IP和对应文档链接，用真实地址替换 `REPLACE_WITH_CFFEX_NTP_HOST_OR_IP`，再把同一份配置分别交给 Windows 和 Linux。脚本遇到占位符会拒绝运行，禁止把 Cloudflare 地址填入生产模板。
+中金所生产模板故意没有真实 NTP 地址。生产验收前，必须从负责人或中金所官方技术文档取得 NTP 域名/IP和对应文档链接，用真实地址替换 `REPLACE_WITH_CFFEX_NTP_HOST_OR_IP`，再把同一份配置分别交给 Windows 和 Linux。脚本遇到占位符会拒绝运行。没有取得中金所地址时可使用腾讯华南替代配置完成设备间校时和行情联调，但报告必须保持 `environment=test`，不得宣称它测得的是中金所时钟偏差，也不得把腾讯或Cloudflare地址填入中金所生产模板。
 
 配置中的 `ntp_servers` 可用空格填写同一授时中心的多个域名/IP。默认单机偏差 `max_offset_ms=50`，Windows/Linux 差异 `max_cross_difference_ms=50`。
 
@@ -30,7 +32,7 @@
 ```powershell
 cd "C:\Users\Hello\Documents\基础环境配置\outputs\share\share\yd_trader"
 powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\windows_time_sync.ps1 `
-  -Config .\config\time_authority.cloudflare-test.conf `
+  -Config .\config\time_authority.tencent-south-china-fallback.conf `
   -Apply `
   -Output .\windows-time.json
 ```
@@ -41,7 +43,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\windows_time_sync.
 
 ```bash
 cd ~/projects/yd_trader
-sudo ./scripts/setup_linux_time_sync.sh --config ./config/time_authority.cloudflare-test.conf
+sudo ./scripts/setup_linux_time_sync.sh --config ./config/time_authority.tencent-south-china-fallback.conf
 ```
 
 该命令会让 chrony 只使用指定网络授时中心，移除内容完全匹配项目旧版本的 `ydtrader-windows-host.conf`，并在 WSL 中设置必要的 `SYNC_IN_CONTAINER=yes`。它会立即校时；不会配置 `PHC0`。
@@ -51,7 +53,7 @@ sudo ./scripts/setup_linux_time_sync.sh --config ./config/time_authority.cloudfl
 ```powershell
 cd "C:\Users\Hello\Documents\基础环境配置\outputs\share\share\yd_trader"
 powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\windows_time_sync.ps1 `
-  -Config .\config\time_authority.cloudflare-test.conf `
+  -Config .\config\time_authority.tencent-south-china-fallback.conf `
   -Output .\windows-time.json
 ```
 
@@ -60,7 +62,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\windows_time_sync.
 ```bash
 cd ~/projects/yd_trader
 ./scripts/linux_time_report.sh \
-  --config ./config/time_authority.cloudflare-test.conf \
+  --config ./config/time_authority.tencent-south-china-fallback.conf \
   --output ./linux-time.json
 ```
 
