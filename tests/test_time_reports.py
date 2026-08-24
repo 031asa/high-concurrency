@@ -104,18 +104,20 @@ def test_old_phc_setup_script_is_removed():
     assert not (ROOT / "scripts" / "setup_wsl_chrony_windows_sync.sh").exists()
 
 
-def test_windows_sync_uses_high_accuracy_profile_and_robust_samples():
-    script = (ROOT / "scripts" / "windows_time_sync.ps1").read_text(encoding="utf-8")
+def test_windows_sync_uses_pinned_meinberg_ntpd_profile():
+    wrapper = (ROOT / "scripts" / "windows_time_sync.ps1").read_text(encoding="utf-8")
+    script = (ROOT / "scripts" / "windows_time_sync_meinberg.ps1").read_text(encoding="utf-8")
+    assert 'windows_time_sync_meinberg.ps1' in wrapper
     for setting in (
-        'Name MinPollInterval -Value 6',
-        'Name MaxPollInterval -Value 6',
-        'Name UpdateInterval -Value 100',
-        'Name FrequencyCorrectRate -Value 2',
-        'Name SpecialPollInterval -Value 64',
-        '[int]$SamplesPerServer = 11',
-        'GetSystemTimePreciseAsFileTime',
-        'median_of_fastest_75_percent',
-        'fewer than 7 valid NTP samples',
-        'W32Time high-accuracy profile is not applied',
+        '$RequiredInternalVersion = "4.2.8p18a-o"',
+        'package_version = "4.2.8p18a2"',
+        'server $server iburst minpoll 6 maxpoll 6',
+        '& $Installation.Ntpq -pn',
+        'Get-ReachSampleCount',
+        'Set-Service -Name W32Time -StartupType Disabled',
+        'Set-Service -Name NTP -StartupType Automatic',
+        'meinberg_ntpd_system_peer',
+        'ntpd selected peer is not the configured authority',
     ):
         assert setting in script
+    assert 'server 127.127.1.0' not in script

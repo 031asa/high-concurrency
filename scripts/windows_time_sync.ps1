@@ -2,8 +2,15 @@
 param(
     [Parameter(Mandatory = $true)][ValidateNotNullOrEmpty()][string]$Config,
     [switch]$Apply,
-    [Parameter(Mandatory = $true)][ValidateNotNullOrEmpty()][string]$Output
+    [Parameter(Mandatory = $true)][ValidateNotNullOrEmpty()][string]$Output,
+    [string]$NtpRoot = "",
+    [ValidateRange(30, 600)][int]$StabilizationTimeoutSeconds = 150
 )
+
+# Preserve the public command name while moving Windows synchronization to the
+# same Meinberg ntpd implementation used by the leader machine.
+& (Join-Path $PSScriptRoot "windows_time_sync_meinberg.ps1") @PSBoundParameters
+exit $LASTEXITCODE
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"

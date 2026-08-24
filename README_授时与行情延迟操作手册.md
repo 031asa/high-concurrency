@@ -1,6 +1,6 @@
 # 授时与行情延迟操作手册
 
-本手册是本项目唯一有效的授时与行情延迟验收流程。Windows 的 `W32Time` 和 Linux 的 `chrony` 必须各自直接连接同一个授时中心；Linux 不得跟随 Windows 的 `PHC0`。只有最终比较显示 `RESULT: PASS`，行情时间差才有解释价值。
+本手册是本项目唯一有效的授时与行情延迟验收流程。Windows 使用 **Meinberg ntpd**，Linux 使用 `chrony`，两端必须各自直接连接同一个授时中心；Linux 不得跟随 Windows 的 `PHC0`。Windows 的 `W32Time` 必须保持停止和禁用，避免两个服务同时调整系统时钟。只有最终比较显示 `RESULT: PASS`，行情时间差才有解释价值。
 
 ## 一、选择同一个授时中心
 
@@ -36,9 +36,9 @@
 | 重新安装程序、恢复柜台配置 | WSL终端 | 命令使用 `sudo` |
 | 取得机器码、签发新许可证 | WSL终端 | 普通用户，不使用 `sudo` |
 | 激活新许可证 | WSL终端 | 命令使用 `sudo` |
-| Windows首次配置或重新应用NTP | Windows PowerShell | **必须以管理员身份运行** |
+| 安装Meinberg NTP、首次配置或重新应用NTP | Windows PowerShell | **必须以管理员身份运行**；UAC选择“是” |
 | 配置或重启WSL mirrored网络 | Windows PowerShell | 普通权限即可，会关闭全部WSL会话 |
-| 生成Windows JSON报告 | Windows PowerShell | **必须以管理员身份运行**，否则可能无法读取W32Time活动源并返回FAIL |
+| 生成Windows JSON报告、运行 `ntpq -pn` | Windows PowerShell | 普通权限即可，不使用管理员窗口 |
 | Linux首次配置或重新应用chrony | WSL终端 | 普通登录后使用 `sudo` |
 | 生成Linux JSON报告 | WSL终端 | 普通用户，不使用 `sudo` |
 | 复制Linux报告、比较两个JSON | Windows PowerShell | 普通权限即可 |
@@ -148,6 +148,25 @@ systemctl list-timers ydtrader-expiry.timer --all --no-pager
 
 重新安装不会代替授时验收。完成激活后继续下面的Windows/Linux报告流程，最终必须重新得到 `RESULT: PASS`，才能接行情。
 
+**【管理员 Windows PowerShell｜必须】安装与 leader 相同的 Meinberg NTP：**
+
+先确认系统不是公司域成员或域控制器；域环境可能依赖 `W32Time`，不得直接禁用。普通个人工作站执行：
+
+```powershell
+winget install --id MeinbergGlobal.NTP --exact --version 4.2.8p18a2 `
+  --source winget --location D:\NTP --interactive `
+  --accept-package-agreements --accept-source-agreements
+```
+
+安装向导中使用 `D:\NTP`，让服务自动启动，并允许安装器禁用其他 Windows 授时服务。安装完成后核对：
+
+```powershell
+& "D:\NTP\bin\ntpd.exe" --version
+Get-Service NTP,W32Time | Format-Table Name,Status,StartType
+```
+
+必须看到安装包版本 `4.2.8p18a2` 对应的内部版本 `ntpd 4.2.8p18a-o`；`NTP` 应为 `Running/Automatic`，`W32Time` 应为 `Stopped/Disabled`。不要同时启用两个校时服务。
+
 **【管理员 Windows PowerShell｜必须】第一次配置Windows：**
 
 ```powershell
@@ -155,14 +174,15 @@ cd "C:\Users\Hello\Documents\基础环境配置\outputs\share\share\yd_trader"
 powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\windows_time_sync.ps1 `
   -Config .\config\time_authority.tencent-south-china-fallback.conf `
   -Apply `
-  -Output .\windows-time.json
+  -Output .\windows-time.json `
+  -NtpRoot D:\NTP
 ```
 
-`-Apply` 会把 W32Time 配到配置文件中的 NTP，并应用微软高精度参数：`MinPollInterval=6`、`MaxPollInterval=6`（固定64秒轮询）、`UpdateInterval=100`、`FrequencyCorrectRate=2`，同时把服务设为自动启动。只有实测偏差超过50 ms时才临时执行一次立即校正，`finally` 会恢复原跳时阈值。配置后脚本会等待约70秒，让强制样本和第一次正常轮询完成，因此窗口暂时没有返回提示不代表卡死。
+`-Apply` 会备份安装器原始配置为 `D:\NTP\etc\ntp.conf.ydtrader-original`，再写入唯一授时中心，使用 `iburst minpoll 6 maxpoll 6`（固定64秒轮询），停止并禁用 `W32Time`，重启 `NTP` 服务。脚本最长等待150秒，直到 `ntpq -pn` 出现属于配置中心的 `*` 选中源且 reach 至少包含3个成功样本。等待期间出现英文等待提示是正常现象。
 
-Windows报告默认采集11次高精度NTP样本，按往返时间保留最快的75%，用中位数作为 `authority_minus_local_ms`，同时输出过滤后平均数、RTT和不确定度。该处理可以降低VPN排队尖峰对报告的影响，但不能消除公网路径的固定上下行不对称。
+Windows报告直接读取 ntpd 已滤波和驯服后的系统状态：`offset` 作为 `authority_minus_local_ms`，同时记录 `sys_jitter`、`rootdisp`、`frequency`、stratum、选中peer、poll、reach、delay和jitter。它比单次公网UDP探测稳定，但仍不能消除VPN路径或公网链路的固定上下行不对称。
 
-从旧版本升级到本版本后，即使Windows以前配置过NTP，也必须在管理员PowerShell重新执行一次带 `-Apply` 的命令。报告要求至少7个有效样本，并会核对上述高精度参数和服务启动方式；没有真正应用成功时会明确返回 `RESULT: FAIL`。
+从旧版 `W32Time` 升级后必须先安装上述精确版本，再在管理员PowerShell执行一次带 `-Apply` 的命令。报告会核对 ntpd 版本、服务状态、唯一选中源、reach样本、stratum和偏差；未真正应用成功时明确返回 `RESULT: FAIL`。域成员机器脚本会拒绝禁用 `W32Time`，必须交由域管理员设计。
 
 **【WSL终端｜命令内含sudo】第一次配置Linux：**
 
@@ -175,16 +195,17 @@ sudo ./scripts/setup_linux_time_sync.sh --config ./config/time_authority.tencent
 
 配置完成后，在60秒内依次生成两端只读报告。
 
-**【管理员 Windows PowerShell｜仍然必须】生成Windows报告：**
+**【普通 Windows PowerShell｜不要管理员】生成Windows报告：**
 
 ```powershell
 cd "C:\Users\Hello\Documents\基础环境配置\outputs\share\share\yd_trader"
 powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\windows_time_sync.ps1 `
   -Config .\config\time_authority.tencent-south-china-fallback.conf `
-  -Output .\windows-time.json
+  -Output .\windows-time.json `
+  -NtpRoot D:\NTP
 ```
 
-不带 `-Apply` 虽然不会修改Windows时间，但脚本仍要读取W32Time活动源；普通PowerShell可能得到 `UNAVAILABLE`，从而出现 `W32Time active source is not the configured authority`。
+不带 `-Apply` 只通过本机 `ntpq` 读取状态，不修改时间或服务，因此普通PowerShell即可。正常结果应显示 `Selected : 106.55.184.199`、毫秒级 `Offset/Jitter` 和 `RESULT: PASS`。如 `ntpq -pn` 没有 `*`，先等待2分钟再查，不要用手工改JSON的方式通过验收。
 
 **【普通WSL终端｜不要sudo】紧接着生成Linux报告：**
 
@@ -222,7 +243,7 @@ leader 原生 Linux 不启用 WSL 兼容逻辑。先复制生产模板为本次�
 | 解压交付包、检查机器码 | leader Linux | 普通用户 |
 | 安装程序、恢复配置、激活许可证 | leader Linux | 对应命令使用 `sudo` |
 | 签发新许可证 | 持有私钥的安全发证机 | 普通用户，不在leader上放私钥 |
-| 配置或检查Windows授时 | Windows PowerShell | **必须以管理员身份运行** |
+| 安装/配置Windows Meinberg ntpd | Windows PowerShell | 安装和 `-Apply` 必须管理员；只读报告普通权限 |
 | 配置leader chrony | leader Linux | 命令使用 `sudo` |
 | 生成leader Linux报告 | leader Linux | 普通用户，不使用 `sudo` |
 
@@ -258,7 +279,7 @@ vi config/time_authority.cffex.conf
 sudo ./tools/setup_linux_time_sync.sh --config ./config/time_authority.cffex.conf
 ```
 
-**【管理员Windows PowerShell】** 按第二节的命令运行 `windows_time_sync.ps1 -Apply`，只是把 `-Config` 换成同一份中金所配置。后续生成Windows JSON时也必须继续使用管理员PowerShell。确认两端 UDP 123 可达后，在60秒内分别生成。
+**【管理员Windows PowerShell】** 先安装第二节指定的 Meinberg 精确版本，再运行 `windows_time_sync.ps1 -Apply`，只是把 `-Config` 换成同一份中金所配置。随后用普通PowerShell生成Windows JSON。确认两端 UDP 123 可达后，在60秒内分别生成。
 
 **【leader普通Linux终端｜不要sudo】生成Linux报告：**
 
@@ -266,7 +287,7 @@ sudo ./tools/setup_linux_time_sync.sh --config ./config/time_authority.cffex.con
 ./tools/linux_time_report.sh --config ./config/time_authority.cffex.conf --output ./linux-time.json
 ```
 
-**【管理员Windows PowerShell】** 生成 `windows-time.json`。人工传递两个 JSON 文件，不使用 SSH 或共享凭据；再使用**普通Windows PowerShell**在Windows主项目目录运行 `compare_time_reports.ps1`。必须看到 `RESULT: PASS`。
+**【普通Windows PowerShell】** 生成 `windows-time.json`。人工传递两个 JSON 文件，不使用 SSH 或共享凭据；再使用普通Windows PowerShell在Windows主项目目录运行 `compare_time_reports.ps1`。必须看到 `RESULT: PASS`。
 
 ## 四、运行 IC2609 行情延迟测试
 
@@ -285,7 +306,10 @@ cd /opt/ydtrader
 
 ## 五、故障判定
 
-- Windows 活动源显示 `Local CMOS Clock`：W32Time 没有使用网络源，用管理员 PowerShell重新执行 `-Apply`。
+- `ntpq -pn` 没有任何peer：`D:\NTP\etc\ntp.conf` 尚未写入服务器，用管理员PowerShell重新执行 `-Apply`。
+- `ntpq -pn` 有peer但没有 `*`：尚未选中有效源；保持电脑和服务运行2分钟，检查 UDP 123、VPN路径与 `reach`。不得配置 `LOCAL(0)` 伪造通过。
+- Windows报告提示 `W32Time` 未禁用或 `NTP` 未自动运行：两个校时服务状态不合格，用管理员PowerShell重新执行 `-Apply`，不要手工同时启动二者。
+- Windows报告提示版本不符：安装包不是 `4.2.8p18a2`（内部版本应为 `4.2.8p18a-o`），先统一版本再验收。
 - Linux 选中源为 `PHC0`、模式为 `#` 或没有选中源：仍在使用旧配置或网络 NTP不可达，重新执行 Linux 配置脚本并检查 UDP 123、DNS与 `chronyc sources -v`。
 - 配置中心、官网或NTP列表不一致：复制同一份配置到两端，不要只凭服务器看起来相近就继续。
 - 报告相隔超过60秒：不需要重新配置，只需在60秒内重新生成两份只读 JSON。
