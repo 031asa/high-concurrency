@@ -1,0 +1,44 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<sbe:messageSchema
+    xmlns:sbe="http://fixprotocol.io/2016/sbe"
+    package="com.ydtrader.mvp.codec"
+    id="701"
+    version="1"
+    semanticVersion="1.0.0"
+    description="YDTrader Aeron market-data MVP"
+    byteOrder="littleEndian">
+  <types>
+    <composite name="messageHeader" description="SBE message header">
+      <type name="blockLength" primitiveType="uint16"/>
+      <type name="templateId" primitiveType="uint16"/>
+      <type name="schemaId" primitiveType="uint16"/>
+      <type name="version" primitiveType="uint16"/>
+    </composite>
+
+    <composite name="varStringEncoding" description="UTF-8 variable-length string">
+      <type name="length" primitiveType="uint16" maxValue="1024"/>
+      <type name="varData" primitiveType="uint8" length="0" characterEncoding="UTF-8"/>
+    </composite>
+
+    <enum name="BooleanType" encodingType="uint8">
+      <validValue name="FALSE">0</validValue>
+      <validValue name="TRUE">1</validValue>
+    </enum>
+  </types>
+
+  <sbe:message name="MarketQuote" id="1" description="Normalized raw quote envelope">
+    <field name="sequence" id="1" type="uint64"/>
+    <field name="marketTimestampNs" id="2" type="uint64"/>
+    <field name="localReceiveNs" id="3" type="uint64"/>
+    <field name="lastPrice" id="4" type="double"/>
+    <field name="bidPrice" id="5" type="double"/>
+    <field name="askPrice" id="6" type="double"/>
+    <field name="bidVolume" id="7" type="int64"/>
+    <field name="askVolume" id="8" type="int64"/>
+    <field name="timestampValid" id="9" type="BooleanType"/>
+    <data name="sessionId" id="10" type="varStringEncoding"/>
+    <data name="instrument" id="11" type="varStringEncoding"/>
+    <data name="tradingDay" id="12" type="varStringEncoding"/>
+    <data name="marketTimestampRaw" id="13" type="varStringEncoding"/>
+  </sbe:message>
+</sbe:messageSchema>
