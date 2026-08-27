@@ -3,6 +3,8 @@
 这个目录是行情高并发架构的可运行验证，不接触 `secure_release_toolkit`，也不替换现有
 YDApi/Unix socket 命令。它先用确定性模拟行情证明最难的传输和恢复语义：
 
+[查看系统架构图（初版）](../docs/high-concurrency-architecture.md)
+
 ```text
 SBE publisher -> Aeron IPC -> Aeron Archive
                                   |-- compute open-ended replay
