@@ -122,6 +122,7 @@ if [[ "$source" == ctp ]]; then
 fi
 
 run_id=$(date -u +%Y%m%dT%H%M%SZ)-$$
+run_started_at_utc=$(date -u +%Y-%m-%dT%H:%M:%SZ)
 run_dir="$PROJECT_ROOT/result/aeron-mvp/$run_id"
 archive_dir="$run_dir/archive"
 control_dir="$run_dir/control"
@@ -133,8 +134,19 @@ publisher_pid=
 compute_pid=
 audit_pid=
 bridge_pid=
+run_status=RUNNING
 
 mkdir -p "$archive_dir" "$control_dir"
+
+write_run_metadata() {
+    local metadata_tmp="$run_dir/run.meta.tmp"
+    printf 'run_id=%s\nsource=%s\nexpected_count=%s\nsync_level=%s\nstarted_at_utc=%s\nstatus=%s\nrecording_id=%s\n' \
+        "$run_id" "$source" "$count" "$sync_level" "$run_started_at_utc" "$run_status" \
+        "${recording_id:-}" >"$metadata_tmp"
+    mv "$metadata_tmp" "$run_dir/run.meta"
+}
+
+write_run_metadata
 
 stop_if_running() {
     local process_id=$1
@@ -150,6 +162,10 @@ cleanup() {
     stop_if_running "$compute_pid"
     stop_if_running "$publisher_pid"
     stop_if_running "$server_pid"
+    if [[ "$run_status" == RUNNING ]]; then
+        run_status=FAILED
+        write_run_metadata
+    fi
 }
 trap cleanup EXIT INT TERM
 
@@ -208,6 +224,7 @@ for _ in $(seq 1 200); do
 done
 [[ -s "$recording_file" ]] || { printf 'timed out waiting for recording id\n' >&2; exit 1; }
 recording_id=$(tr -d '[:space:]' <"$recording_file")
+write_run_metadata
 
 "${RUN_JAVA[@]}" compute \
     --aeron-dir "$aeron_dir" \
@@ -215,6 +232,8 @@ recording_id=$(tr -d '[:space:]' <"$recording_file")
     --expected-count "$count" \
     --timeout-seconds 60 \
     --summary-file "$run_dir/compute-live.summary" \
+    --progress-file "$run_dir/compute-live.ndjson" \
+    --progress-interval-ms 250 \
     >"$run_dir/compute-live.log" 2>&1 &
 compute_pid=$!
 
@@ -224,6 +243,8 @@ compute_pid=$!
     --expected-count "$count" \
     --timeout-seconds 60 \
     --summary-file "$run_dir/audit-live.summary" \
+    --progress-file "$run_dir/audit-live.ndjson" \
+    --progress-interval-ms 250 \
     >"$run_dir/audit-live.log" 2>&1 &
 audit_pid=$!
 
@@ -351,6 +372,9 @@ cmp --silent "$run_dir/compute-live.summary" "$run_dir/compute-after-restart.sum
     printf 'statistics changed after Archive/consumer restart\n' >&2
     exit 1
 }
+
+run_status=SUCCESS
+write_run_metadata
 
 printf 'AERON_MVP_ACCEPTANCE result=SUCCESS recording_id=%s sent=%s sync_level=%s source=%s\n' \
     "$recording_id" "$count" "$sync_level" "$source"

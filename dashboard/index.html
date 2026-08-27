@@ -1,0 +1,235 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>YDTrader · Aeron 实时监控</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      --bg: #071019;
+      --panel: #0d1a25;
+      --panel-2: #122331;
+      --line: #243847;
+      --text: #edf7f6;
+      --muted: #8ea6ad;
+      --cyan: #4be3c2;
+      --blue: #59a7ff;
+      --amber: #ffbf69;
+      --red: #ff6b7a;
+      font-family: Inter, "Segoe UI", "Microsoft YaHei", sans-serif;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      min-height: 100vh;
+      background:
+        radial-gradient(circle at 85% -10%, rgba(75, 227, 194, .14), transparent 32rem),
+        radial-gradient(circle at -10% 35%, rgba(89, 167, 255, .10), transparent 28rem),
+        var(--bg);
+      color: var(--text);
+    }
+    .shell { width: min(1440px, calc(100% - 40px)); margin: 0 auto; padding: 32px 0 44px; }
+    header { display: flex; align-items: flex-start; justify-content: space-between; gap: 24px; margin-bottom: 26px; }
+    .eyebrow { color: var(--cyan); letter-spacing: .16em; font-size: 12px; font-weight: 700; text-transform: uppercase; }
+    h1 { margin: 8px 0 7px; font-size: clamp(27px, 4vw, 44px); letter-spacing: -.04em; font-weight: 650; }
+    .subtitle { color: var(--muted); font-size: 14px; }
+    .status-pill { display: flex; align-items: center; gap: 9px; padding: 10px 14px; border: 1px solid var(--line); border-radius: 999px; background: rgba(13, 26, 37, .85); font-size: 13px; }
+    .dot { width: 9px; height: 9px; border-radius: 50%; background: var(--muted); box-shadow: 0 0 0 4px rgba(142, 166, 173, .12); }
+    .dot.running { background: var(--blue); box-shadow: 0 0 0 4px rgba(89, 167, 255, .15); animation: pulse 1.4s infinite; }
+    .dot.success { background: var(--cyan); box-shadow: 0 0 0 4px rgba(75, 227, 194, .15); }
+    .dot.failed, .dot.incomplete { background: var(--red); box-shadow: 0 0 0 4px rgba(255, 107, 122, .14); }
+    @keyframes pulse { 50% { opacity: .45; } }
+    .runbar { display: grid; grid-template-columns: 1.5fr repeat(4, 1fr); gap: 1px; overflow: hidden; border: 1px solid var(--line); border-radius: 14px; background: var(--line); margin-bottom: 16px; }
+    .run-cell { background: var(--panel); padding: 13px 16px; min-width: 0; }
+    .label { color: var(--muted); font-size: 11px; letter-spacing: .08em; text-transform: uppercase; }
+    .run-value { margin-top: 5px; font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .metrics { display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; margin-bottom: 14px; }
+    .card, .chart-card, .table-card { border: 1px solid var(--line); border-radius: 16px; background: linear-gradient(145deg, rgba(18, 35, 49, .94), rgba(10, 23, 33, .95)); }
+    .card { padding: 20px; min-height: 132px; }
+    .metric { margin: 14px 0 5px; font-variant-numeric: tabular-nums; font-size: clamp(25px, 3vw, 36px); font-weight: 650; letter-spacing: -.04em; }
+    .metric small { color: var(--muted); font-size: 13px; font-weight: 500; letter-spacing: 0; }
+    .hint { color: var(--muted); font-size: 12px; }
+    .progress { height: 4px; margin-top: 13px; border-radius: 5px; overflow: hidden; background: #20313d; }
+    .progress > div { height: 100%; width: 0; background: linear-gradient(90deg, var(--blue), var(--cyan)); transition: width .35s; }
+    .charts { display: grid; grid-template-columns: 1.6fr 1fr; gap: 14px; margin-bottom: 14px; }
+    .chart-card { padding: 19px 20px 15px; min-height: 310px; }
+    .section-title { margin: 0; font-size: 15px; font-weight: 600; }
+    .section-meta { margin: 6px 0 13px; color: var(--muted); font-size: 12px; }
+    svg { width: 100%; height: 225px; overflow: visible; }
+    .grid-line { stroke: #203440; stroke-width: 1; }
+    .axis-label { fill: #78929a; font-size: 10px; }
+    .chart-line { fill: none; stroke: var(--cyan); stroke-width: 2.2; vector-effect: non-scaling-stroke; }
+    .chart-area { fill: url(#areaGradient); opacity: .32; }
+    #latency-line { stroke: var(--blue); }
+    .table-card { padding: 20px; }
+    table { width: 100%; border-collapse: collapse; margin-top: 12px; font-size: 13px; }
+    th, td { padding: 12px 10px; border-top: 1px solid var(--line); text-align: right; font-variant-numeric: tabular-nums; }
+    th:first-child, td:first-child { text-align: left; }
+    th { color: var(--muted); font-size: 11px; font-weight: 600; }
+    .ok { color: var(--cyan); }
+    .bad { color: var(--red); }
+    .notice { display: none; margin-bottom: 14px; padding: 12px 15px; color: var(--amber); border: 1px solid rgba(255,191,105,.35); border-radius: 12px; background: rgba(255,191,105,.07); font-size: 12px; }
+    footer { display: flex; justify-content: space-between; gap: 16px; margin-top: 16px; color: var(--muted); font-size: 11px; }
+    @media (max-width: 900px) {
+      .metrics { grid-template-columns: repeat(2, 1fr); }
+      .charts { grid-template-columns: 1fr; }
+      .runbar { grid-template-columns: repeat(2, 1fr); }
+      .run-cell:first-child { grid-column: span 2; }
+    }
+    @media (max-width: 560px) {
+      .shell { width: min(100% - 24px, 1440px); padding-top: 22px; }
+      header { flex-direction: column; }
+      .metrics { grid-template-columns: 1fr; }
+      .runbar { grid-template-columns: 1fr; }
+      .run-cell:first-child { grid-column: auto; }
+      .table-wrap { overflow-x: auto; }
+    }
+  </style>
+</head>
+<body>
+  <main class="shell">
+    <header>
+      <div>
+        <div class="eyebrow">YDTrader / Aeron Archive</div>
+        <h1>实时行情链路监控</h1>
+        <div class="subtitle">接收、归档、计算和审计状态的一站式观测面板</div>
+      </div>
+      <div class="status-pill"><span id="status-dot" class="dot"></span><span id="status-text">等待数据</span></div>
+    </header>
+
+    <section class="runbar">
+      <div class="run-cell"><div class="label">Run ID</div><div id="run-id" class="run-value">—</div></div>
+      <div class="run-cell"><div class="label">行情源</div><div id="source" class="run-value">—</div></div>
+      <div class="run-cell"><div class="label">Recording</div><div id="recording" class="run-value">—</div></div>
+      <div class="run-cell"><div class="label">Archive Sync</div><div id="sync-level" class="run-value">—</div></div>
+      <div class="run-cell"><div class="label">开始时间 UTC</div><div id="started" class="run-value">—</div></div>
+    </section>
+
+    <div id="ctp-notice" class="notice">CTP 重放行情的交易所时间戳可能属于历史时段；吞吐和完整性有效，端到端延迟仅供接口联调参考。</div>
+
+    <section class="metrics">
+      <article class="card">
+        <div class="label">处理进度</div>
+        <div class="metric"><span id="received">0</span> <small>/ <span id="expected">0</span></small></div>
+        <div id="progress-hint" class="hint">0.00%</div>
+        <div class="progress"><div id="progress-bar"></div></div>
+      </article>
+      <article class="card">
+        <div class="label">平均吞吐</div>
+        <div class="metric"><span id="rate">0</span> <small>msg/s</small></div>
+        <div class="hint">Compute Replay 消费速率</div>
+      </article>
+      <article class="card">
+        <div class="label">平均延迟</div>
+        <div class="metric"><span id="mean">—</span> <small>ms</small></div>
+        <div class="hint">本地接收时间 − 行情时间</div>
+      </article>
+      <article class="card">
+        <div class="label">P95 延迟</div>
+        <div class="metric"><span id="p95">—</span> <small>ms</small></div>
+        <div class="hint">完成后给出精确分位值</div>
+      </article>
+    </section>
+
+    <section class="charts">
+      <article class="chart-card">
+        <h2 class="section-title">吞吐曲线</h2>
+        <div class="section-meta">最近 720 个采样点 · 250ms 原始快照</div>
+        <svg id="rate-chart" viewBox="0 0 700 225" preserveAspectRatio="none" aria-label="吞吐曲线"></svg>
+      </article>
+      <article class="chart-card">
+        <h2 class="section-title">平均延迟曲线</h2>
+        <div class="section-meta">下游实时计算，不影响发布链路</div>
+        <svg id="latency-chart" viewBox="0 0 430 225" preserveAspectRatio="none" aria-label="延迟曲线"></svg>
+      </article>
+    </section>
+
+    <section class="table-card">
+      <h2 class="section-title">链路完整性与消费者状态</h2>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>消费者</th><th>状态</th><th>已接收</th><th>序列缺口</th><th>重复</th><th>无效时间戳</th><th>最大延迟 ms</th></tr></thead>
+          <tbody>
+            <tr><td>Compute</td><td id="compute-status">—</td><td id="compute-received">0</td><td id="compute-gaps">0</td><td id="compute-duplicates">0</td><td id="compute-invalid">0</td><td id="compute-max">—</td></tr>
+            <tr><td>Audit</td><td id="audit-status">—</td><td id="audit-received">0</td><td id="audit-gaps">0</td><td id="audit-duplicates">0</td><td id="audit-invalid">0</td><td>—</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+    <footer><span id="result-dir">结果目录：—</span><span id="updated">尚未刷新</span></footer>
+  </main>
+
+  <script>
+    const $ = id => document.getElementById(id);
+    const number = (value, digits = 0) => {
+      if (value === null || value === undefined || Number.isNaN(Number(value))) return '—';
+      return Number(value).toLocaleString('zh-CN', { maximumFractionDigits: digits, minimumFractionDigits: digits });
+    };
+    const statusLabel = value => ({ RUNNING: '运行中', SUCCESS: '成功', FAILED: '失败', INCOMPLETE: '不完整', IDLE: '等待数据' }[value] || value || '等待数据');
+    function setStatusCell(id, status) {
+      const node = $(id); node.textContent = statusLabel(status);
+      node.className = status === 'SUCCESS' ? 'ok' : (status === 'RUNNING' ? '' : 'bad');
+    }
+    function chart(svg, points, key, lineId) {
+      const width = svg.viewBox.baseVal.width, height = svg.viewBox.baseVal.height;
+      const pad = { left: 44, right: 10, top: 12, bottom: 24 };
+      const clean = points.map(p => Number(p[key])).filter(Number.isFinite);
+      const max = Math.max(1, ...clean), min = Math.min(0, ...clean);
+      const x = i => pad.left + (points.length <= 1 ? 0 : i * (width - pad.left - pad.right) / (points.length - 1));
+      const y = value => pad.top + (max - value) * (height - pad.top - pad.bottom) / Math.max(1e-9, max - min);
+      let html = '<defs><linearGradient id="areaGradient" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#4be3c2"/><stop offset="1" stop-color="#4be3c2" stop-opacity="0"/></linearGradient></defs>';
+      for (let i = 0; i <= 4; i++) {
+        const gy = pad.top + i * (height - pad.top - pad.bottom) / 4;
+        const val = max - i * (max - min) / 4;
+        html += `<line class="grid-line" x1="${pad.left}" y1="${gy}" x2="${width-pad.right}" y2="${gy}"/><text class="axis-label" x="0" y="${gy+3}">${number(val, val < 10 ? 2 : 0)}</text>`;
+      }
+      const coords = points.map((p, i) => `${x(i)},${y(Number(p[key]) || 0)}`).join(' ');
+      if (coords) {
+        html += `<polyline id="${lineId}" class="chart-line" points="${coords}"/>`;
+      }
+      if (!points.length) html += `<text class="axis-label" x="${width/2-35}" y="${height/2}">等待采样数据</text>`;
+      svg.innerHTML = html;
+    }
+    function render(data) {
+      const run = data.run || {}, compute = data.compute || {}, audit = data.audit || {};
+      const state = data.dashboard_status || 'IDLE';
+      $('status-text').textContent = statusLabel(state);
+      $('status-dot').className = `dot ${state.toLowerCase()}`;
+      $('run-id').textContent = run.id || '—'; $('source').textContent = (run.source || '—').toUpperCase();
+      $('recording').textContent = run.recording_id || '—'; $('sync-level').textContent = run.sync_level ?? '—';
+      $('started').textContent = run.started_at_utc || '—'; $('result-dir').textContent = `结果目录：${run.result_dir || '—'}`;
+      $('ctp-notice').style.display = run.source === 'ctp' ? 'block' : 'none';
+      const expected = Number(run.expected_count || compute.expected || 0), received = Number(compute.received || 0);
+      const percent = expected ? Math.min(100, received * 100 / expected) : 0;
+      $('received').textContent = number(received); $('expected').textContent = number(expected);
+      $('progress-hint').textContent = `${number(percent, 2)}%`;
+      $('progress-bar').style.width = `${percent}%`;
+      $('rate').textContent = number(compute.rate_per_second || 0);
+      $('mean').textContent = number(compute.mean_ms, 3); $('p95').textContent = number(compute.p95_ms, 3);
+      for (const [prefix, value] of [['compute', compute], ['audit', audit]]) {
+        setStatusCell(`${prefix}-status`, value.status);
+        $(`${prefix}-received`).textContent = number(value.received || 0);
+        $(`${prefix}-gaps`).textContent = number(value.gaps || 0);
+        $(`${prefix}-duplicates`).textContent = number(value.duplicates || 0);
+        $(`${prefix}-invalid`).textContent = number(value.invalid_timestamps || 0);
+      }
+      $('compute-max').textContent = number(compute.max_ms, 3);
+      chart($('rate-chart'), data.series || [], 'rate_per_second', 'rate-line');
+      chart($('latency-chart'), data.series || [], 'mean_ms', 'latency-line');
+      $('updated').textContent = `刷新于 ${new Date(data.generated_at_ms).toLocaleTimeString('zh-CN')}`;
+    }
+    async function refresh() {
+      try {
+        const response = await fetch('/api/status', { cache: 'no-store' });
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        render(await response.json());
+      } catch (error) {
+        $('status-text').textContent = `连接失败：${error.message}`;
+        $('status-dot').className = 'dot failed';
+      }
+    }
+    refresh(); setInterval(refresh, 1000);
+  </script>
+</body>
+</html>

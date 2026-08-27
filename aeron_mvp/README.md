@@ -21,9 +21,10 @@ SBE publisher -> Aeron IPC -> Aeron Archive
 - `compute` 与 `audit` 两个独立 JVM 进程同时跟随仍在写入的 recording；
 - consumer 不参与原始临时流的 flow control；
 - sequence 缺口、重复和无效时间戳使结果成为 `INCOMPLETE`；
-- 实时计算和停止后的完整重放结果逐字段一致。
+- 实时计算和停止后的完整重放结果逐字段一致；
+- 下游 Compute/Audit 每 250ms 输出轻量 NDJSON 快照，Dashboard 按秒展示进度、吞吐、延迟和完整性。
 
-MVP 不包含真实 YDApi adapter、C/Cython SPSC bridge、Web Dashboard、跨机器 UDP、HA
+MVP 不包含真实 YDApi adapter、C/Cython SPSC bridge、跨机器 UDP、HA
 或自动销毁。CTP 适配器用于在 YDApi 无行情时验证同一条下游链路；正式接回 YDApi 时
 保持 schema、stream ID、Archive 和消费者不变，只替换最上游行情 adapter。
 
@@ -77,6 +78,23 @@ AERON_MVP_ACCEPTANCE live_compute=SUCCESS live_audit=SUCCESS replay_match=YES
 运行证据和持久化 recording 保存在 `result/aeron-mvp/<run-id>/`。实时统计剔除每个
 producer session 的第一条有效行情；`std_ms` 为样本标准差，`p95_ms` 使用 nearest-rank。
 
+## 启动实时 Dashboard
+
+先在一个 WSL 终端启动只读监控服务：
+
+```bash
+conda activate ydtrader-high-concurrency
+bash scripts/run_dashboard.sh --port 8080
+```
+
+浏览器打开 `http://127.0.0.1:8080`，再在另一个终端运行任一 Aeron 验收命令。页面会自动
+选取 `result/aeron-mvp/` 中最新的 run，并每秒刷新。服务默认只监听本机；确需供局域网查看时
+显式传入 `--host 0.0.0.0`，并由主机防火墙限制访问范围。
+
+Dashboard 只读取 Compute/Audit 已写出的 NDJSON 和 summary，不订阅发布流、不参与 Aeron
+flow control，也不在行情回调中执行磁盘或网络操作。实时阶段显示 mean/std/max；精确 P95
+在计算完成后由同一套统计代码写入最终快照。
+
 ## OpenCTP 7x24 行情验收
 
 附件中的 `openctp_ctp` 回调被封装成独立 Python 采集进程。采集进程把每条真实 CTP Tick
@@ -122,5 +140,6 @@ OpenCTP 7x24 环境可能重放历史交易日，因此其 market timestamp 适�
 bash aeron_mvp/build_release.sh
 ```
 
-生成 `result/ydtrader-aeron-mvp-java-0.1.1-linux-x86_64.tar.gz`，包含精简 Java 17
-运行时和 Aeron runtime；目标 Linux x86_64 主机无需预装 Java或联网下载依赖。
+生成 `result/ydtrader-aeron-mvp-java-0.2.0-linux-x86_64.tar.gz`，包含精简 Java 17
+运行时、Aeron runtime 和 Dashboard 静态资源；核心验收无需预装 Java或联网下载依赖，
+Dashboard 另需目标机已有 Python 3.9+。

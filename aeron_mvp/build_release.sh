@@ -3,7 +3,7 @@ set -euo pipefail
 
 SCRIPT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
 PROJECT_ROOT=$(cd -- "$SCRIPT_DIR/.." && pwd)
-VERSION=0.1.1
+VERSION=0.2.0
 PLATFORM=linux-x86_64
 DIST_NAME="ydtrader-aeron-mvp-java-${VERSION}-${PLATFORM}"
 RESULT_DIR="$PROJECT_ROOT/result"
@@ -43,6 +43,7 @@ mkdir -p \
     "$STAGE_DIST/aeron_mvp/build" \
     "$STAGE_DIST/aeron_mvp/lib" \
     "$STAGE_DIST/aeron_mvp/schema" \
+    "$STAGE_DIST/dashboard" \
     "$STAGE_DIST/licenses" \
     "$STAGE_DIST/scripts"
 
@@ -55,7 +56,9 @@ cp -a "$SCRIPT_DIR/schema/market-data.xml" "$STAGE_DIST/aeron_mvp/schema/market-
 cp -a "$AERON_JAR" "$STAGE_DIST/aeron_mvp/lib/aeron-all-1.51.0.jar"
 cp -a "$PROJECT_ROOT/scripts/run_aeron_mvp.sh" "$STAGE_DIST/scripts/run_aeron_mvp.sh"
 cp -a "$PROJECT_ROOT/scripts/run_ctp_aeron_mvp.sh" "$STAGE_DIST/scripts/run_ctp_aeron_mvp.sh"
+cp -a "$PROJECT_ROOT/scripts/run_dashboard.sh" "$STAGE_DIST/scripts/run_dashboard.sh"
 cp -a "$PROJECT_ROOT/scripts/bootstrap_ctp_tts.sh" "$STAGE_DIST/scripts/bootstrap_ctp_tts.sh"
+cp -a "$PROJECT_ROOT/dashboard/." "$STAGE_DIST/dashboard/"
 cp -a "$PROJECT_ROOT/requirements-ctp.txt" "$STAGE_DIST/requirements-ctp.txt"
 cp -a "$SCRIPT_DIR/PACKAGE_README.md" "$STAGE_DIST/README.md"
 cp -a "$SCRIPT_DIR/THIRD_PARTY_NOTICES.md" "$STAGE_DIST/THIRD_PARTY_NOTICES.md"
@@ -80,7 +83,9 @@ chmod 0755 \
     "$STAGE_DIST/aeron_mvp/ctp_bridge.py" \
     "$STAGE_DIST/scripts/run_aeron_mvp.sh" \
     "$STAGE_DIST/scripts/run_ctp_aeron_mvp.sh" \
+    "$STAGE_DIST/scripts/run_dashboard.sh" \
     "$STAGE_DIST/scripts/bootstrap_ctp_tts.sh" \
+    "$STAGE_DIST/dashboard/server.py" \
     "$STAGE_DIST/aeron_mvp/runtime/bin/java"
 
 (cd "$STAGE_DIST" && \

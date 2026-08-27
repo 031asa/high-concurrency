@@ -52,16 +52,19 @@ flowchart TB
         direction LR
         STAT["统计结果<br/>Mean / Std / P95 / Max"]
         QUALITY["质量指标<br/>Gap / Duplicate / Invalid"]
+        STREAM[("NDJSON 实时快照<br/>250ms｜当前已实现")]
         SUMMARY[("Summary / Log<br/>当前已实现")]
-        API["Metrics API / WebSocket<br/>规划"]
-        DASH["实时监控 Dashboard<br/>曲线 / 统计表 / 告警｜规划"]
+        API["只读 HTTP Metrics API<br/>JSON 轮询｜当前已实现"]
+        DASH["实时监控 Dashboard<br/>曲线 / 统计表｜当前已实现"]
 
-        COMPUTE --> STAT --> SUMMARY
-        AUDIT --> QUALITY --> SUMMARY
+        COMPUTE --> STAT --> STREAM
+        AUDIT --> QUALITY --> STREAM
+        STAT --> SUMMARY
+        QUALITY --> SUMMARY
         REPLAY --> STAT
-        STAT -.-> API
-        QUALITY -.-> API
-        API -.-> DASH
+        STREAM --> API
+        SUMMARY --> API
+        API --> DASH
     end
 
     subgraph FOUNDATION["运行与基础设施底座"]
@@ -89,4 +92,5 @@ flowchart TB
 - 实线表示当前已经实现并完成验收的链路，虚线表示下一阶段规划。
 - OpenCTP/CTP 是 YDApi 休市期间的测试行情入口，不改变正式架构的数据源定位。
 - 正式接回 YDApi 时只替换最上游 Adapter；SBE、Aeron、Archive、计算、审计和重放链路保持不变。
-- Dashboard 当前属于规划范围，现阶段结果通过 summary 和日志输出。
+- Dashboard 当前从 Compute/Audit 的下游快照和最终 summary 读取数据，不订阅 Publisher，
+  不参与 Aeron flow control；告警推送和 WebSocket 属于后续规划。

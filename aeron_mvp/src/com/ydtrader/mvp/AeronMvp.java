@@ -29,6 +29,7 @@ import java.nio.file.AtomicMoveNotSupportedException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
+import java.nio.file.StandardOpenOption;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -436,6 +437,8 @@ public final class AeronMvp
         final int expectedCount = options.integer("expected-count", -1, 1, Integer.MAX_VALUE);
         final long timeoutSeconds = options.longValue("timeout-seconds", 30, 1, 3600);
         final Path summaryFile = options.optionalPath("summary-file");
+        final Path progressFile = options.optionalPath("progress-file");
+        final long progressIntervalMs = options.longValue("progress-interval-ms", 500, 100, 60_000);
         final int defaultReplayStreamId;
         if (mode == ConsumerMode.AUDIT)
         {
@@ -454,6 +457,11 @@ public final class AeronMvp
 
         final ConsumerState state = new ConsumerState(expectedCount, mode);
         final long startedNs = System.nanoTime();
+        if (progressFile != null)
+        {
+            initialiseProgressFile(progressFile);
+            appendProgress(progressFile, state.serializeProgress(recordingId, 0, false));
+        }
         try (Aeron aeron = connectAeron(aeronDir);
             AeronArchive archive = connectArchive(aeron))
         {
@@ -479,6 +487,7 @@ public final class AeronMvp
                     expectedCount);
                 System.out.flush();
                 long lastProgressNs = System.nanoTime();
+                long nextSnapshotNs = startedNs + Duration.ofMillis(progressIntervalMs).toNanos();
                 while (state.received < expectedCount)
                 {
                     final long before = state.received;
@@ -496,6 +505,14 @@ public final class AeronMvp
                         }
                         Thread.onSpinWait();
                     }
+                    final long nowNs = System.nanoTime();
+                    if (progressFile != null && nowNs >= nextSnapshotNs)
+                    {
+                        appendProgress(
+                            progressFile,
+                            state.serializeProgress(recordingId, nowNs - startedNs, false));
+                        nextSnapshotNs = nowNs + Duration.ofMillis(progressIntervalMs).toNanos();
+                    }
                 }
             }
         }
@@ -508,7 +525,38 @@ public final class AeronMvp
         {
             writeAtomically(summaryFile, summary.serializeStable());
         }
+        if (progressFile != null)
+        {
+            appendProgress(progressFile, summary.serializeProgress(expectedCount));
+        }
         return summary.complete ? 0 : 4;
+    }
+
+    private static void initialiseProgressFile(final Path path) throws IOException
+    {
+        final Path parent = path.toAbsolutePath().getParent();
+        if (parent != null)
+        {
+            Files.createDirectories(parent);
+        }
+        Files.writeString(
+            path,
+            "",
+            StandardCharsets.UTF_8,
+            StandardOpenOption.CREATE,
+            StandardOpenOption.TRUNCATE_EXISTING,
+            StandardOpenOption.WRITE);
+    }
+
+    private static void appendProgress(final Path path, final String line) throws IOException
+    {
+        Files.writeString(
+            path,
+            line,
+            StandardCharsets.UTF_8,
+            StandardOpenOption.CREATE,
+            StandardOpenOption.APPEND,
+            StandardOpenOption.WRITE);
     }
 
     private static int runSelfTest()
@@ -770,8 +818,12 @@ public final class AeronMvp
         System.out.println(
             "  publish-ctp --aeron-dir DIR --recording-file FILE [--count N] " +
             "[--bind-host 127.0.0.1] [--udp-port 24001] [--source-timeout-seconds 60]");
-        System.out.println("  compute --aeron-dir DIR --recording-id ID --expected-count N [--offline]");
-        System.out.println("  audit   --aeron-dir DIR --recording-id ID --expected-count N");
+        System.out.println(
+            "  compute --aeron-dir DIR --recording-id ID --expected-count N [--offline] " +
+            "[--progress-file FILE] [--progress-interval-ms 500]");
+        System.out.println(
+            "  audit   --aeron-dir DIR --recording-id ID --expected-count N " +
+            "[--progress-file FILE] [--progress-interval-ms 500]");
         System.out.println("  selftest");
     }
 
@@ -910,6 +962,42 @@ public final class AeronMvp
                 max == Double.NEGATIVE_INFINITY ? 0 : max,
                 elapsedNs);
         }
+
+        private String serializeProgress(
+            final long recordingId,
+            final long elapsedNs,
+            final boolean finished)
+        {
+            final double seconds = elapsedNs / 1_000_000_000.0;
+            final double rate = seconds == 0 ? 0 : received / seconds;
+            final double std = measured > 1 ? Math.sqrt(m2 / (measured - 1)) : 0;
+            final double currentMax = max == Double.NEGATIVE_INFINITY ? 0 : max;
+            return String.format(
+                Locale.ROOT,
+                "{\"timestamp_ms\":%d,\"mode\":\"%s\",\"status\":\"%s\"," +
+                    "\"finished\":%s,\"recording_id\":%d,\"expected\":%d," +
+                    "\"received\":%d,\"measured\":%d,\"gaps\":%d," +
+                    "\"duplicates\":%d,\"invalid_timestamps\":%d," +
+                    "\"mean_ms\":%.6f,\"std_ms\":%.6f,\"p95_ms\":null," +
+                    "\"max_ms\":%.6f,\"elapsed_seconds\":%.6f," +
+                    "\"rate_per_second\":%.3f}%n",
+                System.currentTimeMillis(),
+                mode,
+                finished ? "INCOMPLETE" : "RUNNING",
+                finished,
+                recordingId,
+                expectedCount,
+                received,
+                measured,
+                gaps,
+                duplicates,
+                invalidTimestamps,
+                mean,
+                std,
+                currentMax,
+                seconds,
+                rate);
+        }
     }
 
     private static final class Summary
@@ -1032,6 +1120,37 @@ public final class AeronMvp
                 std,
                 p95,
                 max);
+        }
+
+        private String serializeProgress(final int expectedCount)
+        {
+            final double seconds = elapsedNs / 1_000_000_000.0;
+            final double rate = seconds == 0 ? 0 : received / seconds;
+            return String.format(
+                Locale.ROOT,
+                "{\"timestamp_ms\":%d,\"mode\":\"%s\",\"status\":\"%s\"," +
+                    "\"finished\":true,\"recording_id\":%d,\"expected\":%d," +
+                    "\"received\":%d,\"measured\":%d,\"gaps\":%d," +
+                    "\"duplicates\":%d,\"invalid_timestamps\":%d," +
+                    "\"mean_ms\":%.6f,\"std_ms\":%.6f,\"p95_ms\":%.3f," +
+                    "\"max_ms\":%.6f,\"elapsed_seconds\":%.6f," +
+                    "\"rate_per_second\":%.3f}%n",
+                System.currentTimeMillis(),
+                mode,
+                complete ? "SUCCESS" : "INCOMPLETE",
+                recordingId,
+                expectedCount,
+                received,
+                measured,
+                gaps,
+                duplicates,
+                invalidTimestamps,
+                mean,
+                std,
+                p95,
+                max,
+                seconds,
+                rate);
         }
     }
 

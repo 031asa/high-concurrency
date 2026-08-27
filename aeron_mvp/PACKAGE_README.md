@@ -1,4 +1,4 @@
-# YDTrader Aeron MVP Java 0.1.1
+# YDTrader Aeron MVP Java 0.2.0
 
 这是 Linux x86_64 自包含验收包，内含精简 Java 17 运行时、Aeron 1.51.0、已编译
 SBE codec 和行情 MVP。目标机不需要安装 Java，也不需要联网下载依赖。
@@ -6,8 +6,8 @@ SBE codec 和行情 MVP。目标机不需要安装 Java，也不需要联网下�
 ## 快速验收
 
 ```bash
-tar -xzf ydtrader-aeron-mvp-java-0.1.1-linux-x86_64.tar.gz
-cd ydtrader-aeron-mvp-java-0.1.1-linux-x86_64
+tar -xzf ydtrader-aeron-mvp-java-0.2.0-linux-x86_64.tar.gz
+cd ydtrader-aeron-mvp-java-0.2.0-linux-x86_64
 sha256sum -c manifest.sha256
 bash scripts/run_aeron_mvp.sh --count 100000 --sync-level 0
 ```
@@ -34,11 +34,22 @@ bash scripts/run_aeron_mvp.sh --count 100000 --sync-level 1
 
 运行结果和 recording 保存在包内 `result/aeron-mvp/<run-id>/`。
 
+## 实时 Dashboard（可选）
+
+目标机已有 Python 3.9+ 时，可在另一个终端启动：
+
+```bash
+bash scripts/run_dashboard.sh --port 8080
+```
+
+浏览器访问 `http://127.0.0.1:8080`。Dashboard 只读取下游实时快照和最终 summary，不会
+进入行情发布或 Aeron flow-control 链路。
+
 ## 当前边界
 
 本版用于确认 Aeron IPC、Archive 持久化、双消费者、实时/离线一致性以及重启恢复。
 默认 publisher 使用确定性模拟行情，尚未连接真实 YDApi；也不包含 C++ SPSC bridge、
-Dashboard、systemd 服务或 `secure_release_toolkit`。
+Dashboard 告警推送、systemd 服务或 `secure_release_toolkit`。
 
 包内附带可选的 OpenCTP Python bridge，但 Python 与原生 wheel 不包含在自包含 Java
 运行时中。目标机需要 `uv`、`curl`、`unzip` 和 `localedef`；以下命令会创建隔离 Python
