@@ -3,21 +3,29 @@ set -euo pipefail
 
 SCRIPT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
 PROJECT_ROOT=$(cd -- "$SCRIPT_DIR/.." && pwd)
-VERSION=0.1.0
+VERSION=0.1.1
 PLATFORM=linux-x86_64
 DIST_NAME="ydtrader-aeron-mvp-java-${VERSION}-${PLATFORM}"
 RESULT_DIR="$PROJECT_ROOT/result"
 DIST_DIR="$RESULT_DIR/$DIST_NAME"
 ARCHIVE_FILE="$RESULT_DIR/$DIST_NAME.tar.gz"
 ARCHIVE_HASH_FILE="$ARCHIVE_FILE.sha256"
-JAVA_HOME=${JAVA_HOME:-/home/hello/.local/opt/jdk-17.0.19+10}
-AERON_JAR=${AERON_JAR:-/home/hello/.cache/ydtrader-mvp/aeron-all-1.51.0.jar}
+source "$SCRIPT_DIR/env.sh"
 
 if [[ "$(uname -s)" != Linux || "$(uname -m)" != x86_64 ]]; then
     printf 'release build requires Linux x86_64\n' >&2
     exit 2
 fi
-for required in "$JAVA_HOME/bin/java" "$JAVA_HOME/bin/jlink" "$AERON_JAR"; do
+if ! aeron_mvp_resolve_build_dependencies; then
+    if [[ "${AERON_MVP_AUTO_BOOTSTRAP:-1}" == 1 ]]; then
+        bash "$SCRIPT_DIR/bootstrap.sh"
+    fi
+    aeron_mvp_resolve_build_dependencies || {
+        aeron_mvp_print_dependency_help
+        exit 2
+    }
+fi
+for required in "$JAVA_HOME/bin/java" "$JAVA_HOME/bin/jlink" "$JAVA_HOME/bin/jar" "$AERON_JAR"; do
     if [[ ! -f "$required" ]]; then
         printf 'missing release dependency: %s\n' "$required" >&2
         exit 2
@@ -41,6 +49,7 @@ mkdir -p \
 bash "$SCRIPT_DIR/build.sh"
 cp -a "$SCRIPT_DIR/build/classes" "$STAGE_DIST/aeron_mvp/build/classes"
 cp -a "$SCRIPT_DIR/run_java.sh" "$STAGE_DIST/aeron_mvp/run_java.sh"
+cp -a "$SCRIPT_DIR/env.sh" "$STAGE_DIST/aeron_mvp/env.sh"
 cp -a "$SCRIPT_DIR/ctp_bridge.py" "$STAGE_DIST/aeron_mvp/ctp_bridge.py"
 cp -a "$SCRIPT_DIR/schema/market-data.xml" "$STAGE_DIST/aeron_mvp/schema/market-data.xml"
 cp -a "$AERON_JAR" "$STAGE_DIST/aeron_mvp/lib/aeron-all-1.51.0.jar"
@@ -67,6 +76,7 @@ printf '%s\n' "$VERSION" >"$STAGE_DIST/VERSION"
 
 chmod 0755 \
     "$STAGE_DIST/aeron_mvp/run_java.sh" \
+    "$STAGE_DIST/aeron_mvp/env.sh" \
     "$STAGE_DIST/aeron_mvp/ctp_bridge.py" \
     "$STAGE_DIST/scripts/run_aeron_mvp.sh" \
     "$STAGE_DIST/scripts/run_ctp_aeron_mvp.sh" \

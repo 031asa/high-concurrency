@@ -32,22 +32,23 @@ MVP 不包含真实 YDApi adapter、C/Cython SPSC bridge、Web Dashboard、跨�
 - `aeron-all-1.51.0.jar`；
 - `sbe-all-1.38.1.jar`。
 
-默认开发机路径是：
-
-```text
-/home/hello/.local/opt/jdk-17.0.19+10
-/home/hello/.cache/ydtrader-mvp/aeron-all-1.51.0.jar
-/home/hello/.cache/ydtrader-mvp/sbe-all-1.38.1.jar
-```
-
-也可以通过 `JAVA_HOME`、`AERON_JAR` 和 `SBE_JAR` 覆盖。JAR 和生成物不会提交仓库。
-当前 WSL 用户没有系统安装权限时，可在 Linux 项目树执行无 `sudo` 的固定版本安装：
+脚本不依赖任何开发者的绝对路径，按以下顺序发现依赖：显式环境变量、发行包内置 runtime、
+当前 Conda/PATH 中的 JDK 17、项目本地 `result/aeron-mvp-deps/`。JAR 和生成物不会提交
+仓库。首次直接运行验收命令时，缺少的固定版本依赖会自动下载到项目 `result/`；也可以
+提前执行：
 
 ```bash
 bash aeron_mvp/bootstrap.sh
 ```
 
 脚本会逐项校验固定的 SHA-256/SHA-1，不接受未通过校验的下载文件。
+如需完全禁止自动联网，设置 `AERON_MVP_AUTO_BOOTSTRAP=0`，并通过 `JAVA_HOME`、
+`AERON_JAR`、`SBE_JAR` 提供依赖。也可以创建项目 Conda 环境：
+
+```bash
+conda env create -f environment.yml
+conda activate ydtrader-high-concurrency
+```
 
 ## 一键验收
 
@@ -119,5 +120,5 @@ OpenCTP 7x24 环境可能重放历史交易日，因此其 market timestamp 适�
 bash aeron_mvp/build_release.sh
 ```
 
-生成 `result/ydtrader-aeron-mvp-java-0.1.0-linux-x86_64.tar.gz`，包含精简 Java 17
+生成 `result/ydtrader-aeron-mvp-java-0.1.1-linux-x86_64.tar.gz`，包含精简 Java 17
 运行时和 Aeron runtime；目标 Linux x86_64 主机无需预装 Java或联网下载依赖。
