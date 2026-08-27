@@ -24,9 +24,9 @@ SBE publisher -> Aeron IPC -> Aeron Archive
 - 实时计算和停止后的完整重放结果逐字段一致；
 - 下游 Compute/Audit 每 250ms 输出轻量 NDJSON 快照，Dashboard 按秒展示进度、吞吐、延迟和完整性。
 
-MVP 不包含真实 YDApi adapter、C/Cython SPSC bridge、跨机器 UDP、HA
-或自动销毁。CTP 适配器用于在 YDApi 无行情时验证同一条下游链路；正式接回 YDApi 时
-保持 schema、stream ID、Archive 和消费者不变，只替换最上游行情 adapter。
+MVP 现已包含真实 YDApi adapter；仍不包含 C/Cython SPSC bridge、跨机器 UDP、HA
+或自动销毁。CTP 适配器保留为 YDApi 无行情时的测试源。三种数据源共用同一套
+schema、stream ID、Archive 和消费者。
 
 ## 依赖
 
@@ -98,6 +98,30 @@ flow control，也不在行情回调中执行磁盘或网络操作。页面的�
 时间、最新价、买一/卖一和数量；全量行情仍只保存在 Archive。实时阶段显示 mean/std/max；
 精确 P95 在计算完成后由同一套统计代码写入最终快照。
 
+## 易达 YDApi 实时行情
+
+先确认 `config/account.json` 和 `config/ydClient.ini` 是目标环境的真实配置，然后在
+WSL2 项目 Conda 环境中执行：
+
+```bash
+conda env update -f environment.yml --prune
+conda activate ydtrader-high-concurrency
+
+bash scripts/run_ydapi_aeron_mvp.sh \
+  --instrument IF2609 \
+  --count 1000000 \
+  --ydapi-repeat 10000 \
+  --sync-level 0
+```
+
+`ydapi_bridge.py` 使用仓库固定的官方 `pyyd` 1.486.96.99 Linux wheel，直接登录、
+查找并订阅真实合约。易达回调线程只做字段归一化和非阻塞 loopback UDP 投递；
+磁盘持久化由 Aeron Archive 执行，Dashboard 从 Compute/Audit 快照中显示最新真实行情。
+
+YDApi 只提供以 17:00 为起点的行情时钟。Adapter 使用回调接收时间和最近 24 小时
+原则还原绝对时间，包括夜盘跨日；`--ydapi-repeat` 只放大 Aeron 压力，不改变
+Dashboard 快照中的真实价格、数量、合约和行情时间。
+
 ## 官方 CTP 实时行情与最新快照
 
 交易时段可直接连接官方 CTP 实时模拟行情前置，驱动同一条 Aeron/Archive/Compute 链路：
@@ -167,6 +191,6 @@ OpenCTP 7x24 环境可能重放历史交易日，因此其 market timestamp 适�
 bash aeron_mvp/build_release.sh
 ```
 
-生成 `result/ydtrader-aeron-mvp-java-0.3.0-linux-x86_64.tar.gz`，包含精简 Java 17
+生成 `result/ydtrader-aeron-mvp-java-0.4.0-linux-x86_64.tar.gz`，包含精简 Java 17
 运行时、Aeron runtime 和 Dashboard 静态资源；核心验收无需预装 Java或联网下载依赖，
 Dashboard 另需目标机已有 Python 3.9+。

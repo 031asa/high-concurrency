@@ -1,4 +1,4 @@
-# YDTrader Aeron MVP Java 0.3.0
+# YDTrader Aeron MVP Java 0.4.0
 
 这是 Linux x86_64 自包含验收包，内含精简 Java 17 运行时、Aeron 1.51.0、已编译
 SBE codec 和行情 MVP。目标机不需要安装 Java，也不需要联网下载依赖。
@@ -6,8 +6,8 @@ SBE codec 和行情 MVP。目标机不需要安装 Java，也不需要联网下�
 ## 快速验收
 
 ```bash
-tar -xzf ydtrader-aeron-mvp-java-0.3.0-linux-x86_64.tar.gz
-cd ydtrader-aeron-mvp-java-0.3.0-linux-x86_64
+tar -xzf ydtrader-aeron-mvp-java-0.4.0-linux-x86_64.tar.gz
+cd ydtrader-aeron-mvp-java-0.4.0-linux-x86_64
 sha256sum -c manifest.sha256
 bash scripts/run_aeron_mvp.sh --count 100000 --sync-level 0
 ```
@@ -49,8 +49,20 @@ bash scripts/run_dashboard.sh --port 8080
 ## 当前边界
 
 本版用于确认 Aeron IPC、Archive 持久化、双消费者、实时/离线一致性以及重启恢复。
-默认 publisher 使用确定性模拟行情，尚未连接真实 YDApi；也不包含 C++ SPSC bridge、
+默认 publisher 使用确定性模拟行情；可选 YDApi bridge 已能连接真实易达行情。本版不包含 C++ SPSC bridge、
 Dashboard 告警推送、systemd 服务或 `secure_release_toolkit`。
+
+在包目录中创建/更新 Conda 环境，放入真实 `config/account.json` 和
+`config/ydClient.ini` 后，可运行：
+
+```bash
+conda env update -f environment.yml --prune
+conda activate ydtrader-high-concurrency
+bash scripts/run_ydapi_aeron_mvp.sh \
+  --instrument IF2609 --count 1000000 --ydapi-repeat 10000
+```
+
+发行包保留官方 `pyyd` wheel 原始文件，不携带真实账号、密码或 `ydClient.ini`。
 
 包内附带可选的 OpenCTP Python bridge，但 Python 与原生 wheel 不包含在自包含 Java
 运行时中。目标机需要 `uv`、`curl`、`tar`、`unzip` 和 `localedef`。

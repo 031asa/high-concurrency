@@ -11,4 +11,8 @@
 TTS-CTPAPI 6.7.11 SDK，并把行情动态库安装进隔离 runtime；使用者仍须遵守其上游许可
 以及 CTP/OpenCTP 服务条款。
 
+可选 YDApi bridge 使用项目 `vendor/wheels/` 中的官方 `pyyd` 1.486.96.99 Linux x86_64
+wheel。0.4.0 发行包携带该原始 wheel 供独立 Conda 环境安装，不修改其中的 `pyyd` 和
+`yd.so`，使用者仍须持有有效的易达授权、账号和配置，并遵守供应商许可条款。
+
 第三方组件仍分别受其原始许可证约束。

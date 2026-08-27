@@ -9,3 +9,5 @@ dependencies:
   - curl
   - unzip
   - uv
+  - pip:
+      - ./vendor/wheels/pyyd-1.486.96.99-cp39-cp39-linux_x86_64.whl

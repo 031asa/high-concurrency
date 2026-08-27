@@ -19,6 +19,15 @@ ctp_runtime_root=${CTP_TTS_RUNTIME_DIR:-"$PROJECT_ROOT/result/ctp-tts-runtime"}
 ctp_python="$ctp_runtime_root/venv/bin/python"
 ctp_udp_port=$((20000 + ($$ % 20000)))
 ctp_locale_root="$ctp_runtime_root/locale"
+ydapi_instrument=IF2609
+ydapi_repeat=10000
+ydapi_python=${YDAPI_PYTHON:-}
+if [[ -z "$ydapi_python" ]]; then
+    ydapi_python=$(command -v python || command -v python3 || true)
+fi
+ydapi_account_config="$PROJECT_ROOT/config/account.json"
+ydapi_api_config="$PROJECT_ROOT/config/ydClient.ini"
+ydapi_startup_timeout=60
 while [[ $# -gt 0 ]]; do
     case "$1" in
         --count)
@@ -65,6 +74,30 @@ while [[ $# -gt 0 ]]; do
             ctp_udp_port=$2
             shift 2
             ;;
+        --instrument|--ydapi-instrument)
+            ydapi_instrument=$2
+            shift 2
+            ;;
+        --ydapi-repeat)
+            ydapi_repeat=$2
+            shift 2
+            ;;
+        --ydapi-python)
+            ydapi_python=$2
+            shift 2
+            ;;
+        --account-config|--ydapi-account-config)
+            ydapi_account_config=$2
+            shift 2
+            ;;
+        --api-config|--ydapi-api-config)
+            ydapi_api_config=$2
+            shift 2
+            ;;
+        --ydapi-startup-timeout)
+            ydapi_startup_timeout=$2
+            shift 2
+            ;;
         *)
             printf 'unknown option: %s\n' "$1" >&2
             exit 64
@@ -83,8 +116,8 @@ esac
 case "$warmup_ms" in
     ''|*[!0-9]*) printf -- '--warmup-ms must be a non-negative integer\n' >&2; exit 64 ;;
 esac
-[[ "$source" == synthetic || "$source" == ctp ]] || {
-    printf -- '--source must be synthetic or ctp\n' >&2
+[[ "$source" == synthetic || "$source" == ctp || "$source" == ydapi ]] || {
+    printf -- '--source must be synthetic, ctp, or ydapi\n' >&2
     exit 64
 }
 [[ "$ctp_api_kind" == tts || "$ctp_api_kind" == official ]] || {
@@ -100,6 +133,20 @@ case "$ctp_repeat" in
 esac
 [[ "$ctp_repeat" -ge 1 && "$ctp_repeat" -le 1000000 ]] || {
     printf -- '--ctp-repeat must be between 1 and 1000000\n' >&2
+    exit 64
+}
+case "$ydapi_repeat" in
+    ''|*[!0-9]*) printf -- '--ydapi-repeat must be a positive integer\n' >&2; exit 64 ;;
+esac
+[[ "$ydapi_repeat" -ge 1 && "$ydapi_repeat" -le 1000000 ]] || {
+    printf -- '--ydapi-repeat must be between 1 and 1000000\n' >&2
+    exit 64
+}
+case "$ydapi_startup_timeout" in
+    ''|*[!0-9]*) printf -- '--ydapi-startup-timeout must be a positive integer\n' >&2; exit 64 ;;
+esac
+[[ "$ydapi_startup_timeout" -gt 0 ]] || {
+    printf -- '--ydapi-startup-timeout must be greater than zero\n' >&2
     exit 64
 }
 case "$ctp_udp_port" in
@@ -147,6 +194,25 @@ if [[ "$source" == ctp ]]; then
             exit 2
         }
     fi
+fi
+if [[ "$source" == ydapi ]]; then
+    [[ -x "$ydapi_python" ]] || {
+        printf 'YDApi Python is not executable: %s\n' "$ydapi_python" >&2
+        exit 2
+    }
+    [[ -f "$ydapi_account_config" ]] || {
+        printf 'YDApi account config was not found: %s\n' "$ydapi_account_config" >&2
+        exit 2
+    }
+    [[ -f "$ydapi_api_config" ]] || {
+        printf 'YDApi API config was not found: %s\n' "$ydapi_api_config" >&2
+        exit 2
+    }
+    "$ydapi_python" -c 'import pyyd' >/dev/null 2>&1 || {
+        printf 'official pyyd wheel is not installed in: %s\n' "$ydapi_python" >&2
+        printf 'run: conda env update -f environment.yml --prune\n' >&2
+        exit 2
+    }
 fi
 
 latency_mode=live
@@ -238,14 +304,19 @@ for _ in $(seq 1 200); do
 done
 [[ -f "$ready_file" ]] || { printf 'timed out waiting for Aeron server\n' >&2; exit 1; }
 
-if [[ "$source" == ctp ]]; then
-    "${RUN_JAVA[@]}" publish-ctp \
+if [[ "$source" == ctp || "$source" == ydapi ]]; then
+    adapter_timeout=60
+    if [[ "$source" == ydapi ]]; then
+        adapter_timeout=$((ydapi_startup_timeout + 60))
+    fi
+    "${RUN_JAVA[@]}" publish-adapter \
         --aeron-dir "$aeron_dir" \
         --recording-file "$recording_file" \
         --count "$count" \
+        --adapter-name "$source_name" \
         --bind-host 127.0.0.1 \
         --udp-port "$ctp_udp_port" \
-        --source-timeout-seconds 60 \
+        --source-timeout-seconds "$adapter_timeout" \
         >"$run_dir/publisher.log" 2>&1 &
 else
     "${RUN_JAVA[@]}" publish \
@@ -304,12 +375,26 @@ if [[ "$source" == ctp ]]; then
         --idle-timeout-seconds 60 \
         >"$run_dir/ctp-bridge.log" 2>&1 &
     bridge_pid=$!
+elif [[ "$source" == ydapi ]]; then
+    "$ydapi_python" "$MVP_DIR/ydapi_bridge.py" \
+        --instrument "$ydapi_instrument" \
+        --account-config "$ydapi_account_config" \
+        --api-config "$ydapi_api_config" \
+        --udp-host 127.0.0.1 \
+        --udp-port "$ctp_udp_port" \
+        --repeat "$ydapi_repeat" \
+        --startup-timeout-seconds "$ydapi_startup_timeout" \
+        --idle-timeout-seconds 60 \
+        >"$run_dir/ydapi-bridge.log" 2>&1 &
+    bridge_pid=$!
+fi
+if [[ "$source" == ctp || "$source" == ydapi ]]; then
     while kill -0 "$publisher_pid" 2>/dev/null; do
         if ! kill -0 "$bridge_pid" 2>/dev/null; then
             wait "$bridge_pid" || true
             bridge_pid=
-            printf 'CTP bridge exited before publisher completed\n' >&2
-            sed -n '1,240p' "$run_dir/ctp-bridge.log" >&2
+            printf '%s bridge exited before publisher completed\n' "$source_name" >&2
+            sed -n '1,240p' "$run_dir/${source%%-*}-bridge.log" >&2
             exit 1
         fi
         sleep 0.05
@@ -318,7 +403,7 @@ fi
 
 wait "$publisher_pid"
 publisher_pid=
-if [[ "$source" == ctp ]]; then
+if [[ "$source" == ctp || "$source" == ydapi ]]; then
     stop_if_running "$bridge_pid"
     bridge_pid=
 fi
@@ -435,4 +520,6 @@ sed -n '$p' "$run_dir/compute-replay.log"
 sed -n '$p' "$run_dir/compute-after-restart.log"
 if [[ "$source" == ctp ]]; then
     sed -n '1p;$p' "$run_dir/ctp-bridge.log"
+elif [[ "$source" == ydapi ]]; then
+    sed -n '1p;$p' "$run_dir/ydapi-bridge.log"
 fi

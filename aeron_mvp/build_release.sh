@@ -3,7 +3,7 @@ set -euo pipefail
 
 SCRIPT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
 PROJECT_ROOT=$(cd -- "$SCRIPT_DIR/.." && pwd)
-VERSION=0.3.0
+VERSION=0.4.0
 PLATFORM=linux-x86_64
 DIST_NAME="ydtrader-aeron-mvp-java-${VERSION}-${PLATFORM}"
 RESULT_DIR="$PROJECT_ROOT/result"
@@ -43,25 +43,32 @@ mkdir -p \
     "$STAGE_DIST/aeron_mvp/build" \
     "$STAGE_DIST/aeron_mvp/lib" \
     "$STAGE_DIST/aeron_mvp/schema" \
+    "$STAGE_DIST/config" \
     "$STAGE_DIST/dashboard" \
     "$STAGE_DIST/licenses" \
-    "$STAGE_DIST/scripts"
+    "$STAGE_DIST/scripts" \
+    "$STAGE_DIST/vendor/wheels"
 
 bash "$SCRIPT_DIR/build.sh"
 cp -a "$SCRIPT_DIR/build/classes" "$STAGE_DIST/aeron_mvp/build/classes"
 cp -a "$SCRIPT_DIR/run_java.sh" "$STAGE_DIST/aeron_mvp/run_java.sh"
 cp -a "$SCRIPT_DIR/env.sh" "$STAGE_DIST/aeron_mvp/env.sh"
 cp -a "$SCRIPT_DIR/ctp_bridge.py" "$STAGE_DIST/aeron_mvp/ctp_bridge.py"
+cp -a "$SCRIPT_DIR/ydapi_bridge.py" "$STAGE_DIST/aeron_mvp/ydapi_bridge.py"
 cp -a "$SCRIPT_DIR/schema/market-data.xml" "$STAGE_DIST/aeron_mvp/schema/market-data.xml"
 cp -a "$AERON_JAR" "$STAGE_DIST/aeron_mvp/lib/aeron-all-1.51.0.jar"
 cp -a "$PROJECT_ROOT/scripts/run_aeron_mvp.sh" "$STAGE_DIST/scripts/run_aeron_mvp.sh"
 cp -a "$PROJECT_ROOT/scripts/run_ctp_aeron_mvp.sh" "$STAGE_DIST/scripts/run_ctp_aeron_mvp.sh"
 cp -a "$PROJECT_ROOT/scripts/run_ctp_live_aeron_mvp.sh" "$STAGE_DIST/scripts/run_ctp_live_aeron_mvp.sh"
+cp -a "$PROJECT_ROOT/scripts/run_ydapi_aeron_mvp.sh" "$STAGE_DIST/scripts/run_ydapi_aeron_mvp.sh"
 cp -a "$PROJECT_ROOT/scripts/run_dashboard.sh" "$STAGE_DIST/scripts/run_dashboard.sh"
 cp -a "$PROJECT_ROOT/scripts/bootstrap_ctp_tts.sh" "$STAGE_DIST/scripts/bootstrap_ctp_tts.sh"
 cp -a "$PROJECT_ROOT/scripts/bootstrap_ctp_live.sh" "$STAGE_DIST/scripts/bootstrap_ctp_live.sh"
 cp -a "$PROJECT_ROOT/dashboard/." "$STAGE_DIST/dashboard/"
 cp -a "$PROJECT_ROOT/requirements-ctp.txt" "$STAGE_DIST/requirements-ctp.txt"
+cp -a "$PROJECT_ROOT/environment.yml" "$STAGE_DIST/environment.yml"
+cp -a "$PROJECT_ROOT/vendor/wheels/pyyd-1.486.96.99-cp39-cp39-linux_x86_64.whl" \
+    "$STAGE_DIST/vendor/wheels/"
 cp -a "$SCRIPT_DIR/PACKAGE_README.md" "$STAGE_DIST/README.md"
 cp -a "$SCRIPT_DIR/THIRD_PARTY_NOTICES.md" "$STAGE_DIST/THIRD_PARTY_NOTICES.md"
 printf '%s\n' "$VERSION" >"$STAGE_DIST/VERSION"
@@ -83,9 +90,11 @@ chmod 0755 \
     "$STAGE_DIST/aeron_mvp/run_java.sh" \
     "$STAGE_DIST/aeron_mvp/env.sh" \
     "$STAGE_DIST/aeron_mvp/ctp_bridge.py" \
+    "$STAGE_DIST/aeron_mvp/ydapi_bridge.py" \
     "$STAGE_DIST/scripts/run_aeron_mvp.sh" \
     "$STAGE_DIST/scripts/run_ctp_aeron_mvp.sh" \
     "$STAGE_DIST/scripts/run_ctp_live_aeron_mvp.sh" \
+    "$STAGE_DIST/scripts/run_ydapi_aeron_mvp.sh" \
     "$STAGE_DIST/scripts/run_dashboard.sh" \
     "$STAGE_DIST/scripts/bootstrap_ctp_tts.sh" \
     "$STAGE_DIST/scripts/bootstrap_ctp_live.sh" \

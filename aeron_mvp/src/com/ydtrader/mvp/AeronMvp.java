@@ -59,11 +59,11 @@ public final class AeronMvp
     private static final int BUFFER_CAPACITY = 2048;
     private static final int FRAGMENT_LIMIT = 1024;
     private static final long OFFER_TIMEOUT_NS = Duration.ofSeconds(15).toNanos();
-    private static final int CTP_PACKET_MAGIC = 0x43545031;
-    private static final int CTP_PACKET_VERSION = 1;
-    private static final int CTP_PACKET_SIZE = 156;
-    private static final int CTP_TIMESTAMP_VALID_FLAG = 1;
-    private static final int CTP_MAX_REPEAT = 1_000_000;
+    private static final int ADAPTER_PACKET_MAGIC = 0x43545031;
+    private static final int ADAPTER_PACKET_VERSION = 1;
+    private static final int ADAPTER_PACKET_SIZE = 156;
+    private static final int ADAPTER_TIMESTAMP_VALID_FLAG = 1;
+    private static final int ADAPTER_MAX_REPEAT = 1_000_000;
 
     private AeronMvp()
     {
@@ -91,7 +91,8 @@ public final class AeronMvp
                     exitCode = runPublisher(options);
                     break;
                 case "publish-ctp":
-                    exitCode = runCtpPublisher(options);
+                case "publish-adapter":
+                    exitCode = runAdapterPublisher(options);
                     break;
                 case "compute":
                     exitCode = runConsumer(options, ConsumerMode.COMPUTE);
@@ -275,7 +276,7 @@ public final class AeronMvp
         return 0;
     }
 
-    private static int runCtpPublisher(final Options options) throws Exception
+    private static int runAdapterPublisher(final Options options) throws Exception
     {
         final String aeronDir = options.required("aeron-dir");
         final Path recordingFile = Path.of(options.required("recording-file"));
@@ -284,11 +285,18 @@ public final class AeronMvp
         final int udpPort = options.integer("udp-port", 24001, 1, 65535);
         final long sourceTimeoutSeconds = options.longValue(
             "source-timeout-seconds", 60L, 1L, 3600L);
-        final String sessionId = "ctp-" + UUID.randomUUID().toString().replace("-", "");
+        final String adapterName = options.value("adapter-name", "ctp");
+        if (!adapterName.matches("[a-z0-9][a-z0-9-]{0,31}"))
+        {
+            throw new IllegalArgumentException("invalid adapter name: " + adapterName);
+        }
+        final String sessionId = adapterName + "-" +
+            UUID.randomUUID().toString().replace("-", "");
         final UnsafeBuffer buffer = new UnsafeBuffer(ByteBuffer.allocateDirect(BUFFER_CAPACITY));
         final MessageHeaderEncoder headerEncoder = new MessageHeaderEncoder();
         final MarketQuoteEncoder quoteEncoder = new MarketQuoteEncoder();
-        final ByteBuffer packet = ByteBuffer.allocateDirect(CTP_PACKET_SIZE).order(ByteOrder.BIG_ENDIAN);
+        final ByteBuffer packet = ByteBuffer.allocateDirect(ADAPTER_PACKET_SIZE)
+            .order(ByteOrder.BIG_ENDIAN);
 
         long backPressureCount = 0;
         long sourceTicks = 0;
@@ -316,9 +324,10 @@ public final class AeronMvp
                 writeAtomically(recordingFile, Long.toString(recordingId) + "\n");
                 System.out.printf(
                     Locale.ROOT,
-                    "AERON_MVP_CTP_PUBLISHER state=WAITING recording_id=%d session_id=%s " +
-                        "bind=%s:%d count=%d%n",
+                    "AERON_MVP_ADAPTER_PUBLISHER state=WAITING recording_id=%d " +
+                        "adapter=%s session_id=%s bind=%s:%d count=%d%n",
                     recordingId,
+                    adapterName,
                     sessionId,
                     bindHost,
                     udpPort,
@@ -335,17 +344,18 @@ public final class AeronMvp
                             Duration.ofSeconds(sourceTimeoutSeconds).toNanos())
                         {
                             throw new IllegalStateException(
-                                "no valid CTP packet received for " + sourceTimeoutSeconds + " seconds");
+                                "no valid " + adapterName + " packet received for " +
+                                    sourceTimeoutSeconds + " seconds");
                         }
                         Thread.onSpinWait();
                         continue;
                     }
                     lastPacketNs = System.nanoTime();
                     packet.flip();
-                    if (packet.remaining() != CTP_PACKET_SIZE)
+                    if (packet.remaining() != ADAPTER_PACKET_SIZE)
                     {
                         throw new IllegalArgumentException(
-                            "unexpected CTP packet size: " + packet.remaining());
+                            "unexpected " + adapterName + " packet size: " + packet.remaining());
                     }
                     final int magic = packet.getInt();
                     final int version = Short.toUnsignedInt(packet.getShort());
@@ -363,24 +373,27 @@ public final class AeronMvp
                     final String tradingDay = readFixedUtf8(packet, 16);
                     final String marketTimestampRaw = readFixedUtf8(packet, 32);
 
-                    if (magic != CTP_PACKET_MAGIC || version != CTP_PACKET_VERSION)
+                    if (magic != ADAPTER_PACKET_MAGIC || version != ADAPTER_PACKET_VERSION)
                     {
                         throw new IllegalArgumentException(
-                            "invalid CTP packet header magic=" + magic + " version=" + version);
+                            "invalid " + adapterName + " packet header magic=" + magic +
+                                " version=" + version);
                     }
-                    if (repeat < 1 || repeat > CTP_MAX_REPEAT)
+                    if (repeat < 1 || repeat > ADAPTER_MAX_REPEAT)
                     {
-                        throw new IllegalArgumentException("invalid CTP repeat: " + repeat);
+                        throw new IllegalArgumentException(
+                            "invalid " + adapterName + " repeat: " + repeat);
                     }
                     if (sourceSequence != lastSourceSequence + 1)
                     {
                         throw new IllegalStateException(
-                            "CTP bridge sequence discontinuity expected=" +
+                            adapterName + " bridge sequence discontinuity expected=" +
                                 (lastSourceSequence + 1) + " actual=" + sourceSequence);
                     }
                     if (instrument.isEmpty())
                     {
-                        throw new IllegalArgumentException("CTP packet instrument is empty");
+                        throw new IllegalArgumentException(
+                            adapterName + " packet instrument is empty");
                     }
                     lastSourceSequence = sourceSequence;
                     sourceTicks++;
@@ -401,7 +414,7 @@ public final class AeronMvp
                             askPrice,
                             bidVolume,
                             askVolume,
-                            (flags & CTP_TIMESTAMP_VALID_FLAG) != 0,
+                            (flags & ADAPTER_TIMESTAMP_VALID_FLAG) != 0,
                             sessionId,
                             instrument,
                             tradingDay,
@@ -420,8 +433,9 @@ public final class AeronMvp
 
         System.out.printf(
             Locale.ROOT,
-            "AERON_MVP_CTP_PUBLISH result=SUCCESS recording_id=%d source_ticks=%d " +
-                "published=%d stop_position=%d offer_retries=%d%n",
+            "AERON_MVP_ADAPTER_PUBLISH result=SUCCESS adapter=%s recording_id=%d " +
+                "source_ticks=%d published=%d stop_position=%d offer_retries=%d%n",
+            adapterName,
             recordingId,
             sourceTicks,
             published,
@@ -849,8 +863,9 @@ public final class AeronMvp
             "[--sync-level 0] [--reuse-archive]");
         System.out.println("  publish --aeron-dir DIR --recording-file FILE [--count N] [--warmup-ms N]");
         System.out.println(
-            "  publish-ctp --aeron-dir DIR --recording-file FILE [--count N] " +
-            "[--bind-host 127.0.0.1] [--udp-port 24001] [--source-timeout-seconds 60]");
+            "  publish-adapter --aeron-dir DIR --recording-file FILE [--count N] " +
+            "[--adapter-name ctp] [--bind-host 127.0.0.1] [--udp-port 24001] " +
+            "[--source-timeout-seconds 60]");
         System.out.println(
             "  compute --aeron-dir DIR --recording-id ID --expected-count N [--offline] " +
             "[--progress-file FILE] [--progress-interval-ms 500]");
