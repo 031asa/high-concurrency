@@ -16,10 +16,11 @@ from pathlib import Path
 from openctp_ctp import thostmduserapi as mdapi
 
 
-PACKET = struct.Struct("!IHHIQQQdddqq32s16s32s")
+PACKET = struct.Struct("!IHHIQQQd" + "ddqq" * 5 + "32s16s32s")
 MAGIC = 0x43545031
-VERSION = 1
+VERSION = 2
 TIMESTAMP_VALID = 1
+DEPTH_LEVELS = 5
 CHINA_TZ = timezone(timedelta(hours=8))
 
 
@@ -140,16 +141,22 @@ class CtpMarketBridge(mdapi.CThostFtdcMdSpi):
         packet = PACKET.pack(
             MAGIC,
             VERSION,
-            TIMESTAMP_VALID if timestamp_valid else 0,
+            (TIMESTAMP_VALID if timestamp_valid else 0) | (DEPTH_LEVELS << 8),
             self.args.repeat,
             self.sequence,
             market_ns,
             local_receive_ns,
             finite_number(getattr(tick, "LastPrice", 0.0)),
-            finite_number(getattr(tick, "BidPrice1", 0.0)),
-            finite_number(getattr(tick, "AskPrice1", 0.0)),
-            nonnegative_integer(getattr(tick, "BidVolume1", 0)),
-            nonnegative_integer(getattr(tick, "AskVolume1", 0)),
+            *(
+                value
+                for level in range(1, DEPTH_LEVELS + 1)
+                for value in (
+                    finite_number(getattr(tick, f"BidPrice{level}", 0.0)),
+                    finite_number(getattr(tick, f"AskPrice{level}", 0.0)),
+                    nonnegative_integer(getattr(tick, f"BidVolume{level}", 0)),
+                    nonnegative_integer(getattr(tick, f"AskVolume{level}", 0)),
+                )
+            ),
             fixed_utf8(instrument, 32),
             fixed_utf8(trading_day, 16),
             fixed_utf8(market_raw, 32),

@@ -22,7 +22,7 @@ flowchart TB
     subgraph BUS["② 高并发传输与持久化层"]
         direction LR
         VALID["接入校验<br/>Session / Sequence / Timestamp"]
-        SBE["SBE MarketQuote<br/>固定二进制消息模型"]
+        SBE["SBE MarketQuote v2<br/>固定五档行情模型"]
         AP["Aeron IPC Publisher<br/>非阻塞 Offer"]
         MD["Aeron Media Driver<br/>共享内存高速传输"]
         AR["Aeron Archive<br/>Recording + Catalog"]
@@ -94,6 +94,7 @@ flowchart TB
 
 - 实线表示当前已经实现并完成验收的链路，虚线表示下一阶段规划。
 - YDApi 已通过专用 bridge 接入固定 UDP adapter 协议，并共用 SBE、Aeron、Archive、计算、审计和重放链路。
+- 统一消息模型预留五档：YDApi 仅填一档，CTP 可填五档，缺失档位保持空值。
 - 官方 CTP 实时模拟行情用于备用快照验收；OpenCTP TTS 仅作 7×24 历史回放备用。
 - Dashboard 当前从 Compute/Audit 的下游快照和最终 summary 读取数据，不订阅 Publisher，
   不参与 Aeron flow control；告警推送和 WebSocket 属于后续规划。

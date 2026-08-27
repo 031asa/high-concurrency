@@ -63,6 +63,11 @@
     .chart-area { fill: url(#areaGradient); opacity: .32; }
     #latency-line { stroke: var(--blue); }
     .table-card { padding: 20px; }
+    .section-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 18px; }
+    .depth-control { display: flex; align-items: center; gap: 8px; color: var(--muted); font-size: 12px; white-space: nowrap; }
+    .depth-control select { color: var(--text); background: var(--panel-2); border: 1px solid var(--line); border-radius: 8px; padding: 6px 9px; }
+    .bid-value { color: var(--cyan); }
+    .ask-value { color: var(--red); }
     table { width: 100%; border-collapse: collapse; margin-top: 12px; font-size: 13px; }
     th, td { padding: 12px 10px; border-top: 1px solid var(--line); text-align: right; font-variant-numeric: tabular-nums; }
     th:first-child, td:first-child { text-align: left; }
@@ -146,12 +151,27 @@
     </section>
 
     <section class="table-card" style="margin-bottom:14px">
-      <h2 class="section-title">最新采样行情</h2>
-      <div class="section-meta">从 Compute 下游快照读取；全量原始行情保存在 Aeron Archive</div>
+      <div class="section-head">
+        <div>
+          <h2 class="section-title">最新采样行情</h2>
+          <div id="depth-source-hint" class="section-meta">从 Compute 下游快照读取；全量原始行情保存在 Aeron Archive</div>
+        </div>
+        <label class="depth-control">显示档位
+          <select id="depth-select" aria-label="显示盘口档位">
+            <option value="1">1 档</option><option value="2">2 档</option>
+            <option value="3">3 档</option><option value="4">4 档</option>
+            <option value="5" selected>5 档</option>
+          </select>
+        </label>
+      </div>
       <div class="table-wrap">
         <table>
-          <thead><tr><th>序号</th><th>合约</th><th>交易日</th><th>行情时间</th><th>最新价</th><th>买一价</th><th>买一量</th><th>卖一价</th><th>卖一量</th></tr></thead>
-          <tbody><tr><td id="quote-sequence">—</td><td id="quote-instrument">等待行情</td><td id="quote-day">—</td><td id="quote-time">—</td><td id="quote-last">—</td><td id="quote-bid">—</td><td id="quote-bid-volume">—</td><td id="quote-ask">—</td><td id="quote-ask-volume">—</td></tr></tbody>
+          <thead><tr><th>序号</th><th>合约</th><th>交易日</th><th>行情时间</th><th>最新价</th></tr></thead>
+          <tbody><tr><td id="quote-sequence">—</td><td id="quote-instrument">等待行情</td><td id="quote-day">—</td><td id="quote-time">—</td><td id="quote-last">—</td></tr></tbody>
+        </table>
+        <table>
+          <thead><tr><th>档位</th><th>买价</th><th>买量</th><th>卖价</th><th>卖量</th></tr></thead>
+          <tbody id="depth-body"></tbody>
         </table>
       </div>
     </section>
@@ -177,6 +197,30 @@
       if (value === null || value === undefined || Number.isNaN(Number(value))) return '—';
       return Number(value).toLocaleString('zh-CN', { maximumFractionDigits: digits, minimumFractionDigits: digits });
     };
+    let latestQuote = {};
+    function renderDepth(quote) {
+      const requested = Number($('depth-select').value || 5);
+      const fallback = [{
+        level: 1, bid_price: quote.bid_price, bid_volume: quote.bid_volume,
+        ask_price: quote.ask_price, ask_volume: quote.ask_volume
+      }];
+      const depth = Array.isArray(quote.depth) ? quote.depth : fallback;
+      const rows = [];
+      for (let index = 0; index < requested; index++) {
+        const level = depth[index] || { level: index + 1 };
+        rows.push(`<tr><td>${index + 1}</td>` +
+          `<td class="bid-value">${number(level.bid_price, 4)}</td>` +
+          `<td>${number(level.bid_volume)}</td>` +
+          `<td class="ask-value">${number(level.ask_price, 4)}</td>` +
+          `<td>${number(level.ask_volume)}</td></tr>`);
+      }
+      $('depth-body').innerHTML = rows.join('');
+      const available = Math.max(1, Math.min(5, Number(quote.depth_levels || 1)));
+      $('depth-source-hint').textContent = quote.instrument ?
+        `数据源可用 ${available} 档；统一输出五档，缺失档位显示为空` :
+        '从 Compute 下游快照读取；全量原始行情保存在 Aeron Archive';
+    }
+    $('depth-select').addEventListener('change', () => renderDepth(latestQuote));
     const statusLabel = value => ({ RUNNING: '运行中', SUCCESS: '成功', FAILED: '失败', INCOMPLETE: '不完整', IDLE: '等待数据' }[value] || value || '等待数据');
     function setStatusCell(id, status) {
       const node = $(id); node.textContent = statusLabel(status);
@@ -231,15 +275,13 @@
       }
       $('compute-max').textContent = historicalLatency ? '—' : number(compute.max_ms, 3);
       const quote = compute.quote || {};
+      latestQuote = quote;
       $('quote-sequence').textContent = number(quote.sequence);
       $('quote-instrument').textContent = quote.instrument || '等待行情';
       $('quote-day').textContent = quote.trading_day || '—';
       $('quote-time').textContent = quote.market_time || '—';
       $('quote-last').textContent = number(quote.last_price, 4);
-      $('quote-bid').textContent = number(quote.bid_price, 4);
-      $('quote-bid-volume').textContent = number(quote.bid_volume);
-      $('quote-ask').textContent = number(quote.ask_price, 4);
-      $('quote-ask-volume').textContent = number(quote.ask_volume);
+      renderDepth(quote);
       chart($('rate-chart'), data.series || [], 'rate_per_second', 'rate-line');
       chart(
         $('latency-chart'),

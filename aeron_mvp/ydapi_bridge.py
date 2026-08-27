@@ -16,10 +16,11 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 
-PACKET = struct.Struct("!IHHIQQQdddqq32s16s32s")
+PACKET = struct.Struct("!IHHIQQQd" + "ddqq" * 5 + "32s16s32s")
 MAGIC = 0x43545031
-VERSION = 1
+VERSION = 2
 TIMESTAMP_VALID = 1
+DEPTH_LEVELS = 1
 CHINA_TZ = timezone(timedelta(hours=8))
 TRADING_DAY_START_MS = 17 * 60 * 60 * 1000
 DAY_MS = 24 * 60 * 60 * 1000
@@ -122,7 +123,7 @@ class YdApiUdpPublisher:
         packet = PACKET.pack(
             MAGIC,
             VERSION,
-            TIMESTAMP_VALID if timestamp_valid else 0,
+            (TIMESTAMP_VALID if timestamp_valid else 0) | (DEPTH_LEVELS << 8),
             self.repeat,
             sequence,
             market_ns,
@@ -132,6 +133,7 @@ class YdApiUdpPublisher:
             finite_number(getattr(market_data, "ask_price", 0.0)),
             nonnegative_integer(getattr(market_data, "bid_volume", 0)),
             nonnegative_integer(getattr(market_data, "ask_volume", 0)),
+            *(0 for _ in range(16)),
             fixed_utf8(getattr(market_data, "instrument", ""), 32),
             fixed_utf8(getattr(market_data, "tradingday", ""), 16),
             fixed_utf8(raw_timestamp, 32),

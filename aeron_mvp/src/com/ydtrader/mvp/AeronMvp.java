@@ -60,9 +60,12 @@ public final class AeronMvp
     private static final int FRAGMENT_LIMIT = 1024;
     private static final long OFFER_TIMEOUT_NS = Duration.ofSeconds(15).toNanos();
     private static final int ADAPTER_PACKET_MAGIC = 0x43545031;
-    private static final int ADAPTER_PACKET_VERSION = 1;
-    private static final int ADAPTER_PACKET_SIZE = 156;
+    private static final int ADAPTER_PACKET_VERSION_V1 = 1;
+    private static final int ADAPTER_PACKET_VERSION_V2 = 2;
+    private static final int ADAPTER_PACKET_SIZE_V1 = 156;
+    private static final int ADAPTER_PACKET_SIZE_V2 = 284;
     private static final int ADAPTER_TIMESTAMP_VALID_FLAG = 1;
+    private static final int MAX_DEPTH_LEVELS = 5;
     private static final int ADAPTER_MAX_REPEAT = 1_000_000;
 
     private AeronMvp()
@@ -207,6 +210,10 @@ public final class AeronMvp
         final UnsafeBuffer buffer = new UnsafeBuffer(ByteBuffer.allocateDirect(BUFFER_CAPACITY));
         final MessageHeaderEncoder headerEncoder = new MessageHeaderEncoder();
         final MarketQuoteEncoder quoteEncoder = new MarketQuoteEncoder();
+        final double[] bidPrices = new double[MAX_DEPTH_LEVELS];
+        final double[] askPrices = new double[MAX_DEPTH_LEVELS];
+        final long[] bidVolumes = new long[MAX_DEPTH_LEVELS];
+        final long[] askVolumes = new long[MAX_DEPTH_LEVELS];
 
         long backPressureCount = 0;
         long recordingId;
@@ -246,6 +253,10 @@ public final class AeronMvp
                         System.currentTimeMillis() * 1_000_000L + index % 1_000_000L;
                     final long simulatedLatencyNs = ((index % 50L) + 1L) * 1_000_000L;
                     final long marketTimestampNs = localReceiveNs - simulatedLatencyNs;
+                    bidPrices[0] = 4_999.8 + sequence * 0.01;
+                    askPrices[0] = 5_000.2 + sequence * 0.01;
+                    bidVolumes[0] = 10 + sequence % 100;
+                    askVolumes[0] = 20 + sequence % 100;
                     final int encodedLength = encodeQuote(
                         buffer,
                         headerEncoder,
@@ -253,8 +264,17 @@ public final class AeronMvp
                         sequence,
                         marketTimestampNs,
                         localReceiveNs,
+                        5_000.0 + sequence * 0.01,
+                        bidPrices,
+                        askPrices,
+                        bidVolumes,
+                        askVolumes,
+                        1,
+                        true,
                         sessionId,
-                        instrument);
+                        instrument,
+                        "20260826",
+                        Long.toString(marketTimestampNs));
                     backPressureCount += offerUntilAccepted(publication, buffer, encodedLength);
                 }
 
@@ -295,8 +315,12 @@ public final class AeronMvp
         final UnsafeBuffer buffer = new UnsafeBuffer(ByteBuffer.allocateDirect(BUFFER_CAPACITY));
         final MessageHeaderEncoder headerEncoder = new MessageHeaderEncoder();
         final MarketQuoteEncoder quoteEncoder = new MarketQuoteEncoder();
-        final ByteBuffer packet = ByteBuffer.allocateDirect(ADAPTER_PACKET_SIZE)
+        final ByteBuffer packet = ByteBuffer.allocateDirect(ADAPTER_PACKET_SIZE_V2)
             .order(ByteOrder.BIG_ENDIAN);
+        final double[] bidPrices = new double[MAX_DEPTH_LEVELS];
+        final double[] askPrices = new double[MAX_DEPTH_LEVELS];
+        final long[] bidVolumes = new long[MAX_DEPTH_LEVELS];
+        final long[] askVolumes = new long[MAX_DEPTH_LEVELS];
 
         long backPressureCount = 0;
         long sourceTicks = 0;
@@ -352,10 +376,12 @@ public final class AeronMvp
                     }
                     lastPacketNs = System.nanoTime();
                     packet.flip();
-                    if (packet.remaining() != ADAPTER_PACKET_SIZE)
+                    final int packetSize = packet.remaining();
+                    if (packetSize != ADAPTER_PACKET_SIZE_V1 &&
+                        packetSize != ADAPTER_PACKET_SIZE_V2)
                     {
                         throw new IllegalArgumentException(
-                            "unexpected " + adapterName + " packet size: " + packet.remaining());
+                            "unexpected " + adapterName + " packet size: " + packetSize);
                     }
                     final int magic = packet.getInt();
                     final int version = Short.toUnsignedInt(packet.getShort());
@@ -365,19 +391,58 @@ public final class AeronMvp
                     final long marketTimestampNs = packet.getLong();
                     final long localReceiveNs = packet.getLong();
                     final double lastPrice = packet.getDouble();
-                    final double bidPrice = packet.getDouble();
-                    final double askPrice = packet.getDouble();
-                    final long bidVolume = packet.getLong();
-                    final long askVolume = packet.getLong();
+                    Arrays.fill(bidPrices, 0);
+                    Arrays.fill(askPrices, 0);
+                    Arrays.fill(bidVolumes, 0);
+                    Arrays.fill(askVolumes, 0);
+                    final int depthLevels;
+                    if (version == ADAPTER_PACKET_VERSION_V1)
+                    {
+                        if (packetSize != ADAPTER_PACKET_SIZE_V1)
+                        {
+                            throw new IllegalArgumentException(
+                                adapterName + " v1 packet size mismatch: " + packetSize);
+                        }
+                        depthLevels = 1;
+                        bidPrices[0] = packet.getDouble();
+                        askPrices[0] = packet.getDouble();
+                        bidVolumes[0] = packet.getLong();
+                        askVolumes[0] = packet.getLong();
+                    }
+                    else if (version == ADAPTER_PACKET_VERSION_V2)
+                    {
+                        if (packetSize != ADAPTER_PACKET_SIZE_V2)
+                        {
+                            throw new IllegalArgumentException(
+                                adapterName + " v2 packet size mismatch: " + packetSize);
+                        }
+                        depthLevels = (flags >>> 8) & 0xff;
+                        if (depthLevels < 1 || depthLevels > MAX_DEPTH_LEVELS)
+                        {
+                            throw new IllegalArgumentException(
+                                "invalid " + adapterName + " depth levels: " + depthLevels);
+                        }
+                        for (int level = 0; level < MAX_DEPTH_LEVELS; level++)
+                        {
+                            bidPrices[level] = packet.getDouble();
+                            askPrices[level] = packet.getDouble();
+                            bidVolumes[level] = packet.getLong();
+                            askVolumes[level] = packet.getLong();
+                        }
+                    }
+                    else
+                    {
+                        throw new IllegalArgumentException(
+                            "invalid " + adapterName + " packet version=" + version);
+                    }
                     final String instrument = readFixedUtf8(packet, 32);
                     final String tradingDay = readFixedUtf8(packet, 16);
                     final String marketTimestampRaw = readFixedUtf8(packet, 32);
 
-                    if (magic != ADAPTER_PACKET_MAGIC || version != ADAPTER_PACKET_VERSION)
+                    if (magic != ADAPTER_PACKET_MAGIC)
                     {
                         throw new IllegalArgumentException(
-                            "invalid " + adapterName + " packet header magic=" + magic +
-                                " version=" + version);
+                            "invalid " + adapterName + " packet header magic=" + magic);
                     }
                     if (repeat < 1 || repeat > ADAPTER_MAX_REPEAT)
                     {
@@ -410,10 +475,11 @@ public final class AeronMvp
                             marketTimestampNs,
                             localReceiveNs,
                             lastPrice,
-                            bidPrice,
-                            askPrice,
-                            bidVolume,
-                            askVolume,
+                            bidPrices,
+                            askPrices,
+                            bidVolumes,
+                            askVolumes,
+                            depthLevels,
                             (flags & ADAPTER_TIMESTAMP_VALID_FLAG) != 0,
                             sessionId,
                             instrument,
@@ -611,6 +677,10 @@ public final class AeronMvp
         final UnsafeBuffer buffer = new UnsafeBuffer(ByteBuffer.allocateDirect(BUFFER_CAPACITY));
         final MessageHeaderEncoder headerEncoder = new MessageHeaderEncoder();
         final MarketQuoteEncoder quoteEncoder = new MarketQuoteEncoder();
+        final double[] bidPrices = { 5_000.0, 4_999.8, 4_999.6, 4_999.4, 4_999.2 };
+        final double[] askPrices = { 5_000.2, 5_000.4, 5_000.6, 5_000.8, 5_001.0 };
+        final long[] bidVolumes = { 10, 20, 30, 40, 50 };
+        final long[] askVolumes = { 11, 21, 31, 41, 51 };
         final int encodedLength = encodeQuote(
             buffer,
             headerEncoder,
@@ -618,14 +688,26 @@ public final class AeronMvp
             7,
             1_000_000_000L,
             1_012_000_000L,
+            5_000.1,
+            bidPrices,
+            askPrices,
+            bidVolumes,
+            askVolumes,
+            5,
+            true,
             "selftest-session",
-            "IC2609");
+            "IC2609",
+            "20260827",
+            "14:00:00.000");
         final MessageHeaderDecoder headerDecoder = new MessageHeaderDecoder();
         final MarketQuoteDecoder quoteDecoder = new MarketQuoteDecoder();
         quoteDecoder.wrapAndApplyHeader(buffer, 0, headerDecoder);
         if (encodedLength <= MessageHeaderEncoder.ENCODED_LENGTH ||
             quoteDecoder.sequence() != 7 ||
             quoteDecoder.localReceiveNs() - quoteDecoder.marketTimestampNs() != 12_000_000L ||
+            quoteDecoder.depthLevels() != 5 ||
+            quoteDecoder.bidPrice5() != 4_999.2 ||
+            quoteDecoder.askVolume5() != 51 ||
             !"selftest-session".equals(quoteDecoder.sessionId()))
         {
             throw new IllegalStateException("SBE market quote round-trip failed");
@@ -646,40 +728,12 @@ public final class AeronMvp
         final long sequence,
         final long marketTimestampNs,
         final long localReceiveNs,
-        final String sessionId,
-        final String instrument)
-    {
-        return encodeQuote(
-            buffer,
-            headerEncoder,
-            encoder,
-            sequence,
-            marketTimestampNs,
-            localReceiveNs,
-            5_000.0 + sequence * 0.01,
-            4_999.8 + sequence * 0.01,
-            5_000.2 + sequence * 0.01,
-            10 + sequence % 100,
-            20 + sequence % 100,
-            true,
-            sessionId,
-            instrument,
-            "20260826",
-            Long.toString(marketTimestampNs));
-    }
-
-    private static int encodeQuote(
-        final UnsafeBuffer buffer,
-        final MessageHeaderEncoder headerEncoder,
-        final MarketQuoteEncoder encoder,
-        final long sequence,
-        final long marketTimestampNs,
-        final long localReceiveNs,
         final double lastPrice,
-        final double bidPrice,
-        final double askPrice,
-        final long bidVolume,
-        final long askVolume,
+        final double[] bidPrices,
+        final double[] askPrices,
+        final long[] bidVolumes,
+        final long[] askVolumes,
+        final int depthLevels,
         final boolean timestampValid,
         final String sessionId,
         final String instrument,
@@ -691,11 +745,28 @@ public final class AeronMvp
             .marketTimestampNs(marketTimestampNs)
             .localReceiveNs(localReceiveNs)
             .lastPrice(lastPrice)
-            .bidPrice(bidPrice)
-            .askPrice(askPrice)
-            .bidVolume(bidVolume)
-            .askVolume(askVolume)
+            .bidPrice(bidPrices[0])
+            .askPrice(askPrices[0])
+            .bidVolume(bidVolumes[0])
+            .askVolume(askVolumes[0])
             .timestampValid(timestampValid ? BooleanType.TRUE : BooleanType.FALSE)
+            .depthLevels((short)depthLevels)
+            .bidPrice2(bidPrices[1])
+            .askPrice2(askPrices[1])
+            .bidVolume2(bidVolumes[1])
+            .askVolume2(askVolumes[1])
+            .bidPrice3(bidPrices[2])
+            .askPrice3(askPrices[2])
+            .bidVolume3(bidVolumes[2])
+            .askVolume3(askVolumes[2])
+            .bidPrice4(bidPrices[3])
+            .askPrice4(askPrices[3])
+            .bidVolume4(bidVolumes[3])
+            .askVolume4(askVolumes[3])
+            .bidPrice5(bidPrices[4])
+            .askPrice5(askPrices[4])
+            .bidVolume5(bidVolumes[4])
+            .askVolume5(askVolumes[4])
             .sessionId(sessionId)
             .instrument(instrument)
             .tradingDay(tradingDay)
@@ -904,10 +975,11 @@ public final class AeronMvp
         private String lastTradingDay = "";
         private String lastMarketTimestampRaw = "";
         private double lastPrice;
-        private double lastBidPrice;
-        private double lastAskPrice;
-        private long lastBidVolume;
-        private long lastAskVolume;
+        private int lastDepthLevels = 1;
+        private final double[] lastBidPrices = new double[MAX_DEPTH_LEVELS];
+        private final double[] lastAskPrices = new double[MAX_DEPTH_LEVELS];
+        private final long[] lastBidVolumes = new long[MAX_DEPTH_LEVELS];
+        private final long[] lastAskVolumes = new long[MAX_DEPTH_LEVELS];
 
         private ConsumerState(final int expectedCount, final ConsumerMode mode)
         {
@@ -945,10 +1017,29 @@ public final class AeronMvp
 
             lastQuoteSequence = sequence;
             lastPrice = quoteDecoder.lastPrice();
-            lastBidPrice = quoteDecoder.bidPrice();
-            lastAskPrice = quoteDecoder.askPrice();
-            lastBidVolume = quoteDecoder.bidVolume();
-            lastAskVolume = quoteDecoder.askVolume();
+            lastBidPrices[0] = quoteDecoder.bidPrice();
+            lastAskPrices[0] = quoteDecoder.askPrice();
+            lastBidVolumes[0] = quoteDecoder.bidVolume();
+            lastAskVolumes[0] = quoteDecoder.askVolume();
+            final int decodedDepthLevels = quoteDecoder.depthLevels();
+            lastDepthLevels = decodedDepthLevels >= 1 && decodedDepthLevels <= MAX_DEPTH_LEVELS ?
+                decodedDepthLevels : 1;
+            lastBidPrices[1] = quoteDecoder.bidPrice2();
+            lastAskPrices[1] = quoteDecoder.askPrice2();
+            lastBidVolumes[1] = quoteDecoder.bidVolume2();
+            lastAskVolumes[1] = quoteDecoder.askVolume2();
+            lastBidPrices[2] = quoteDecoder.bidPrice3();
+            lastAskPrices[2] = quoteDecoder.askPrice3();
+            lastBidVolumes[2] = quoteDecoder.bidVolume3();
+            lastAskVolumes[2] = quoteDecoder.askVolume3();
+            lastBidPrices[3] = quoteDecoder.bidPrice4();
+            lastAskPrices[3] = quoteDecoder.askPrice4();
+            lastBidVolumes[3] = quoteDecoder.bidVolume4();
+            lastAskVolumes[3] = quoteDecoder.askVolume4();
+            lastBidPrices[4] = quoteDecoder.bidPrice5();
+            lastAskPrices[4] = quoteDecoder.askPrice5();
+            lastBidVolumes[4] = quoteDecoder.bidVolume5();
+            lastAskVolumes[4] = quoteDecoder.askVolume5();
             final String sessionId = quoteDecoder.sessionId();
             lastInstrument = quoteDecoder.instrument();
             lastTradingDay = quoteDecoder.tradingDay();
@@ -1041,10 +1132,12 @@ public final class AeronMvp
             final double rate = seconds == 0 ? 0 : received / seconds;
             final double std = measured > 1 ? Math.sqrt(m2 / (measured - 1)) : 0;
             final double currentMax = max == Double.NEGATIVE_INFINITY ? 0 : max;
+            final String depth = serializeDepth();
             final String quote = hasQuote ? String.format(
                 Locale.ROOT,
                 "{\"sequence\":%d,\"instrument\":\"%s\",\"trading_day\":\"%s\"," +
                     "\"market_time\":\"%s\",\"last_price\":%.10f," +
+                    "\"depth_levels\":%d,\"depth\":%s," +
                     "\"bid_price\":%.10f,\"bid_volume\":%d," +
                     "\"ask_price\":%.10f,\"ask_volume\":%d}",
                 lastQuoteSequence,
@@ -1052,10 +1145,12 @@ public final class AeronMvp
                 jsonEscape(lastTradingDay),
                 jsonEscape(lastMarketTimestampRaw),
                 lastPrice,
-                lastBidPrice,
-                lastBidVolume,
-                lastAskPrice,
-                lastAskVolume) : "null";
+                lastDepthLevels,
+                depth,
+                lastBidPrices[0],
+                lastBidVolumes[0],
+                lastAskPrices[0],
+                lastAskVolumes[0]) : "null";
             return String.format(
                 Locale.ROOT,
                 "{\"timestamp_ms\":%d,\"mode\":\"%s\",\"status\":\"%s\"," +
@@ -1082,6 +1177,36 @@ public final class AeronMvp
                 currentMax,
                 seconds,
                 rate);
+        }
+
+        private String serializeDepth()
+        {
+            final StringBuilder json = new StringBuilder(320).append('[');
+            for (int level = 0; level < MAX_DEPTH_LEVELS; level++)
+            {
+                if (level > 0)
+                {
+                    json.append(',');
+                }
+                json.append("{\"level\":").append(level + 1)
+                    .append(",\"bid_price\":").append(nullablePrice(lastBidPrices[level]))
+                    .append(",\"bid_volume\":").append(nullableVolume(lastBidVolumes[level]))
+                    .append(",\"ask_price\":").append(nullablePrice(lastAskPrices[level]))
+                    .append(",\"ask_volume\":").append(nullableVolume(lastAskVolumes[level]))
+                    .append('}');
+            }
+            return json.append(']').toString();
+        }
+
+        private static String nullablePrice(final double value)
+        {
+            return Double.isFinite(value) && value > 0 ?
+                String.format(Locale.ROOT, "%.10f", value) : "null";
+        }
+
+        private static String nullableVolume(final long value)
+        {
+            return value > 0 ? Long.toString(value) : "null";
         }
     }
 

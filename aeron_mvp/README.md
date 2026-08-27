@@ -94,8 +94,9 @@ bash scripts/run_dashboard.sh --port 8080
 显式传入 `--host 0.0.0.0`，并由主机防火墙限制访问范围。
 
 Dashboard 只读取 Compute/Audit 已写出的 NDJSON 和 summary，不订阅发布流、不参与 Aeron
-flow control，也不在行情回调中执行磁盘或网络操作。页面的“最新采样行情”展示合约、行情
-时间、最新价、买一/卖一和数量；全量行情仍只保存在 Archive。实时阶段显示 mean/std/max；
+flow control。页面的“最新采样行情”固定携带五档槽位，可选显示 1～5 档；
+YDApi 只填写一档，CTP 最多填写五档，任何缺失档位都输出空值而不伪造数据。
+全量行情仍只保存在 Archive。实时阶段显示 mean/std/max；
 精确 P95 在计算完成后由同一套统计代码写入最终快照。
 
 ## 易达 YDApi 实时行情
@@ -191,6 +192,6 @@ OpenCTP 7x24 环境可能重放历史交易日，因此其 market timestamp 适�
 bash aeron_mvp/build_release.sh
 ```
 
-生成 `result/ydtrader-aeron-mvp-java-0.4.0-linux-x86_64.tar.gz`，包含精简 Java 17
+生成 `result/ydtrader-aeron-mvp-java-0.5.0-linux-x86_64.tar.gz`，包含精简 Java 17
 运行时、Aeron runtime 和 Dashboard 静态资源；核心验收无需预装 Java或联网下载依赖，
 Dashboard 另需目标机已有 Python 3.9+。
