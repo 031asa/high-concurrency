@@ -106,7 +106,7 @@
       <div class="run-cell"><div class="label">开始时间 UTC</div><div id="started" class="run-value">—</div></div>
     </section>
 
-    <div id="ctp-notice" class="notice">CTP 重放行情的交易所时间戳可能属于历史时段；吞吐和完整性有效，端到端延迟仅供接口联调参考。</div>
+    <div id="ctp-notice" class="notice">当前是 OpenCTP 历史回放行情：吞吐和完整性有效，但交易所时间不代表当前时刻，因此延迟指标不展示。</div>
 
     <section class="metrics">
       <article class="card">
@@ -123,12 +123,12 @@
       <article class="card">
         <div class="label">平均延迟</div>
         <div class="metric"><span id="mean">—</span> <small>ms</small></div>
-        <div class="hint">本地接收时间 − 行情时间</div>
+        <div id="mean-hint" class="hint">本地接收时间 − 行情时间</div>
       </article>
       <article class="card">
         <div class="label">P95 延迟</div>
         <div class="metric"><span id="p95">—</span> <small>ms</small></div>
-        <div class="hint">完成后给出精确分位值</div>
+        <div id="p95-hint" class="hint">完成后给出精确分位值</div>
       </article>
     </section>
 
@@ -143,6 +143,17 @@
         <div class="section-meta">下游实时计算，不影响发布链路</div>
         <svg id="latency-chart" viewBox="0 0 430 225" preserveAspectRatio="none" aria-label="延迟曲线"></svg>
       </article>
+    </section>
+
+    <section class="table-card" style="margin-bottom:14px">
+      <h2 class="section-title">最新采样行情</h2>
+      <div class="section-meta">从 Compute 下游快照读取；全量原始行情保存在 Aeron Archive</div>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>序号</th><th>合约</th><th>交易日</th><th>行情时间</th><th>最新价</th><th>买一价</th><th>买一量</th><th>卖一价</th><th>卖一量</th></tr></thead>
+          <tbody><tr><td id="quote-sequence">—</td><td id="quote-instrument">等待行情</td><td id="quote-day">—</td><td id="quote-time">—</td><td id="quote-last">—</td><td id="quote-bid">—</td><td id="quote-bid-volume">—</td><td id="quote-ask">—</td><td id="quote-ask-volume">—</td></tr></tbody>
+        </table>
+      </div>
     </section>
 
     <section class="table-card">
@@ -171,7 +182,7 @@
       const node = $(id); node.textContent = statusLabel(status);
       node.className = status === 'SUCCESS' ? 'ok' : (status === 'RUNNING' ? '' : 'bad');
     }
-    function chart(svg, points, key, lineId) {
+    function chart(svg, points, key, lineId, emptyLabel = '等待采样数据') {
       const width = svg.viewBox.baseVal.width, height = svg.viewBox.baseVal.height;
       const pad = { left: 44, right: 10, top: 12, bottom: 24 };
       const clean = points.map(p => Number(p[key])).filter(Number.isFinite);
@@ -188,7 +199,7 @@
       if (coords) {
         html += `<polyline id="${lineId}" class="chart-line" points="${coords}"/>`;
       }
-      if (!points.length) html += `<text class="axis-label" x="${width/2-35}" y="${height/2}">等待采样数据</text>`;
+      if (!points.length) html += `<text class="axis-label" x="${width/2-55}" y="${height/2}">${emptyLabel}</text>`;
       svg.innerHTML = html;
     }
     function render(data) {
@@ -199,14 +210,18 @@
       $('run-id').textContent = run.id || '—'; $('source').textContent = (run.source || '—').toUpperCase();
       $('recording').textContent = run.recording_id || '—'; $('sync-level').textContent = run.sync_level ?? '—';
       $('started').textContent = run.started_at_utc || '—'; $('result-dir').textContent = `结果目录：${run.result_dir || '—'}`;
-      $('ctp-notice').style.display = run.source === 'ctp' ? 'block' : 'none';
+      const historicalLatency = run.latency_mode === 'historical_replay';
+      $('ctp-notice').style.display = historicalLatency ? 'block' : 'none';
       const expected = Number(run.expected_count || compute.expected || 0), received = Number(compute.received || 0);
       const percent = expected ? Math.min(100, received * 100 / expected) : 0;
       $('received').textContent = number(received); $('expected').textContent = number(expected);
       $('progress-hint').textContent = `${number(percent, 2)}%`;
       $('progress-bar').style.width = `${percent}%`;
-      $('rate').textContent = number(compute.rate_per_second || 0);
-      $('mean').textContent = number(compute.mean_ms, 3); $('p95').textContent = number(compute.p95_ms, 3);
+      $('rate').textContent = number(compute.rate_per_second);
+      $('mean').textContent = historicalLatency ? '—' : number(compute.mean_ms, 3);
+      $('p95').textContent = historicalLatency ? '—' : number(compute.p95_ms, 3);
+      $('mean-hint').textContent = historicalLatency ? '历史行情时间，不计算实时链路延迟' : '本地接收时间 − 行情时间';
+      $('p95-hint').textContent = historicalLatency ? '切换实时行情源后启用' : '完成后给出精确分位值';
       for (const [prefix, value] of [['compute', compute], ['audit', audit]]) {
         setStatusCell(`${prefix}-status`, value.status);
         $(`${prefix}-received`).textContent = number(value.received || 0);
@@ -214,9 +229,25 @@
         $(`${prefix}-duplicates`).textContent = number(value.duplicates || 0);
         $(`${prefix}-invalid`).textContent = number(value.invalid_timestamps || 0);
       }
-      $('compute-max').textContent = number(compute.max_ms, 3);
+      $('compute-max').textContent = historicalLatency ? '—' : number(compute.max_ms, 3);
+      const quote = compute.quote || {};
+      $('quote-sequence').textContent = number(quote.sequence);
+      $('quote-instrument').textContent = quote.instrument || '等待行情';
+      $('quote-day').textContent = quote.trading_day || '—';
+      $('quote-time').textContent = quote.market_time || '—';
+      $('quote-last').textContent = number(quote.last_price, 4);
+      $('quote-bid').textContent = number(quote.bid_price, 4);
+      $('quote-bid-volume').textContent = number(quote.bid_volume);
+      $('quote-ask').textContent = number(quote.ask_price, 4);
+      $('quote-ask-volume').textContent = number(quote.ask_volume);
       chart($('rate-chart'), data.series || [], 'rate_per_second', 'rate-line');
-      chart($('latency-chart'), data.series || [], 'mean_ms', 'latency-line');
+      chart(
+        $('latency-chart'),
+        historicalLatency ? [] : (data.series || []),
+        'mean_ms',
+        'latency-line',
+        historicalLatency ? '历史回放不展示延迟' : '等待采样数据'
+      );
       $('updated').textContent = `刷新于 ${new Date(data.generated_at_ms).toLocaleTimeString('zh-CN')}`;
     }
     async function refresh() {

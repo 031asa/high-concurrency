@@ -86,6 +86,10 @@ def _latest_run(result_root: Path) -> Optional[Path]:
 def _consumer_payload(run_dir: Path, name: str) -> tuple[Dict[str, Any], List[Dict[str, Any]]]:
     rows = _read_progress(run_dir / f"{name}-live.ndjson")
     current: Dict[str, Any] = dict(rows[-1]) if rows else {}
+    for row in reversed(rows):
+        if row.get("quote"):
+            current["quote"] = row["quote"]
+            break
     final = _summary(run_dir / f"{name}-live.summary")
     if final:
         current.update(final)
@@ -113,6 +117,7 @@ def collect_status(result_root: Path) -> Dict[str, Any]:
     run = {
         "id": meta.get("run_id", run_dir.name),
         "source": meta.get("source", "unknown"),
+        "latency_mode": meta.get("latency_mode", "live"),
         "expected_count": int(meta.get("expected_count", compute.get("expected", 0)) or 0),
         "sync_level": int(meta.get("sync_level", 0) or 0),
         "started_at_utc": meta.get("started_at_utc", ""),

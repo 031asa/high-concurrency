@@ -11,6 +11,8 @@ sync_level=0
 warmup_ms=3000
 source=synthetic
 ctp_front=tcp://trading.openctp.cn:30011
+ctp_api_kind=tts
+ctp_latency_mode=historical_replay
 ctp_instruments=IF2609,IC2609,IH2609,IM2609,rb2610,au2610,ag2612,cu2610,m2609,i2609,SR609,TA609,si2609,lc2609
 ctp_repeat=10000
 ctp_runtime_root=${CTP_TTS_RUNTIME_DIR:-"$PROJECT_ROOT/result/ctp-tts-runtime"}
@@ -37,6 +39,14 @@ while [[ $# -gt 0 ]]; do
             ;;
         --ctp-front)
             ctp_front=$2
+            shift 2
+            ;;
+        --ctp-api-kind)
+            ctp_api_kind=$2
+            shift 2
+            ;;
+        --ctp-latency-mode)
+            ctp_latency_mode=$2
             shift 2
             ;;
         --ctp-instruments)
@@ -77,6 +87,14 @@ esac
     printf -- '--source must be synthetic or ctp\n' >&2
     exit 64
 }
+[[ "$ctp_api_kind" == tts || "$ctp_api_kind" == official ]] || {
+    printf -- '--ctp-api-kind must be tts or official\n' >&2
+    exit 64
+}
+[[ "$ctp_latency_mode" == historical_replay || "$ctp_latency_mode" == live ]] || {
+    printf -- '--ctp-latency-mode must be historical_replay or live\n' >&2
+    exit 64
+}
 case "$ctp_repeat" in
     ''|*[!0-9]*) printf -- '--ctp-repeat must be a positive integer\n' >&2; exit 64 ;;
 esac
@@ -96,6 +114,8 @@ if [[ "$source" == ctp ]]; then
         printf 'CTP Python is not executable: %s\n' "$ctp_python" >&2
         exit 2
     }
+    ctp_runtime_root=$(cd -- "$(dirname -- "$ctp_python")/../.." && pwd)
+    ctp_locale_root="$ctp_runtime_root/locale"
     if [[ ! -f "$ctp_locale_root/zh_CN.GB18030/LC_CTYPE" ]]; then
         command -v localedef >/dev/null || {
             printf 'localedef is required by the openctp-ctp Linux wheel\n' >&2
@@ -114,11 +134,28 @@ if [[ "$source" == ctp ]]; then
         printf 'run: bash scripts/bootstrap_ctp_tts.sh\n' >&2
         exit 2
     }
-    [[ "$ctp_api_version" == *"openctp-tts v6.7.11"* ]] || {
-        printf 'wrong CTP native library: %s\n' "$ctp_api_version" >&2
-        printf 'OpenCTP TTS requires its matching library; run: bash scripts/bootstrap_ctp_tts.sh\n' >&2
-        exit 2
-    }
+    if [[ "$ctp_api_kind" == tts ]]; then
+        [[ "$ctp_api_version" == *"openctp-tts v6.7.11"* ]] || {
+            printf 'wrong CTP native library for TTS: %s\n' "$ctp_api_version" >&2
+            printf 'run: bash scripts/bootstrap_ctp_tts.sh\n' >&2
+            exit 2
+        }
+    else
+        [[ "$ctp_api_version" != *"openctp-tts"* ]] || {
+            printf 'official CTP source cannot use the TTS native library: %s\n' "$ctp_api_version" >&2
+            printf 'run: bash scripts/bootstrap_ctp_live.sh\n' >&2
+            exit 2
+        }
+    fi
+fi
+
+latency_mode=live
+source_name=$source
+if [[ "$source" == ctp ]]; then
+    latency_mode=$ctp_latency_mode
+    if [[ "$ctp_api_kind" == official ]]; then
+        source_name=ctp-live
+    fi
 fi
 
 run_id=$(date -u +%Y%m%dT%H%M%SZ)-$$
@@ -140,8 +177,8 @@ mkdir -p "$archive_dir" "$control_dir"
 
 write_run_metadata() {
     local metadata_tmp="$run_dir/run.meta.tmp"
-    printf 'run_id=%s\nsource=%s\nexpected_count=%s\nsync_level=%s\nstarted_at_utc=%s\nstatus=%s\nrecording_id=%s\n' \
-        "$run_id" "$source" "$count" "$sync_level" "$run_started_at_utc" "$run_status" \
+    printf 'run_id=%s\nsource=%s\nlatency_mode=%s\nexpected_count=%s\nsync_level=%s\nstarted_at_utc=%s\nstatus=%s\nrecording_id=%s\n' \
+        "$run_id" "$source_name" "$latency_mode" "$count" "$sync_level" "$run_started_at_utc" "$run_status" \
         "${recording_id:-}" >"$metadata_tmp"
     mv "$metadata_tmp" "$run_dir/run.meta"
 }
@@ -169,7 +206,15 @@ cleanup() {
 }
 trap cleanup EXIT INT TERM
 
-if [[ ! -d "$MVP_DIR/build/classes" ]]; then
+main_class="$MVP_DIR/build/classes/com/ydtrader/mvp/AeronMvp.class"
+needs_build=0
+if [[ ! -f "$main_class" ]]; then
+    needs_build=1
+elif [[ -f "$MVP_DIR/build.sh" ]] && \
+    find "$MVP_DIR/src" "$MVP_DIR/schema" -type f -newer "$main_class" -print -quit | grep -q .; then
+    needs_build=1
+fi
+if [[ "$needs_build" == 1 ]]; then
     bash "$MVP_DIR/build.sh"
 fi
 "${RUN_JAVA[@]}" selftest | tee "$run_dir/selftest.log"
@@ -255,6 +300,7 @@ if [[ "$source" == ctp ]]; then
         --udp-host 127.0.0.1 \
         --udp-port "$ctp_udp_port" \
         --repeat "$ctp_repeat" \
+        --flow-path "$control_dir/ctp-flow" \
         --idle-timeout-seconds 60 \
         >"$run_dir/ctp-bridge.log" 2>&1 &
     bridge_pid=$!
@@ -377,7 +423,7 @@ run_status=SUCCESS
 write_run_metadata
 
 printf 'AERON_MVP_ACCEPTANCE result=SUCCESS recording_id=%s sent=%s sync_level=%s source=%s\n' \
-    "$recording_id" "$count" "$sync_level" "$source"
+    "$recording_id" "$count" "$sync_level" "$source_name"
 printf 'AERON_MVP_ACCEPTANCE live_compute=SUCCESS live_audit=SUCCESS replay_match=YES\n'
 printf 'AERON_MVP_ACCEPTANCE archive_restart=SUCCESS consumer_restart=SUCCESS\n'
 printf 'AERON_MVP_RESULT_DIR %s\n' "$run_dir"

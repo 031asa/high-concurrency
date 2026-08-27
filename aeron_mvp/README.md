@@ -75,7 +75,9 @@ AERON_MVP_ACCEPTANCE result=SUCCESS ...
 AERON_MVP_ACCEPTANCE live_compute=SUCCESS live_audit=SUCCESS replay_match=YES
 ```
 
-运行证据和持久化 recording 保存在 `result/aeron-mvp/<run-id>/`。实时统计剔除每个
+运行证据和持久化 recording 保存在 `result/aeron-mvp/<run-id>/`。源码树中的 Java/SBE
+文件比现有 class 新时，验收脚本会自动重编译，避免 `git pull` 后继续运行旧 class。
+实时统计剔除每个
 producer session 的第一条有效行情；`std_ms` 为样本标准差，`p95_ms` 使用 nearest-rank。
 
 ## 启动实时 Dashboard
@@ -92,10 +94,31 @@ bash scripts/run_dashboard.sh --port 8080
 显式传入 `--host 0.0.0.0`，并由主机防火墙限制访问范围。
 
 Dashboard 只读取 Compute/Audit 已写出的 NDJSON 和 summary，不订阅发布流、不参与 Aeron
-flow control，也不在行情回调中执行磁盘或网络操作。实时阶段显示 mean/std/max；精确 P95
-在计算完成后由同一套统计代码写入最终快照。
+flow control，也不在行情回调中执行磁盘或网络操作。页面的“最新采样行情”展示合约、行情
+时间、最新价、买一/卖一和数量；全量行情仍只保存在 Archive。实时阶段显示 mean/std/max；
+精确 P95 在计算完成后由同一套统计代码写入最终快照。
 
-## OpenCTP 7x24 行情验收
+## 官方 CTP 实时行情与最新快照
+
+交易时段可直接连接官方 CTP 实时模拟行情前置，驱动同一条 Aeron/Archive/Compute 链路：
+
+```bash
+bash scripts/run_ctp_live_aeron_mvp.sh \
+  --count 1000000 \
+  --ctp-repeat 10000 \
+  --sync-level 0
+```
+
+启动脚本使用独立的 `result/ctp-live-runtime`，下载的 SDK 压缩包及官方行情 `.so` 均校验
+固定 SHA-256，并验证 API 版本为 6.7.11。默认前置为
+`tcp://182.254.243.31:30011`；可用 `--ctp-front` 覆盖。Dashboard 会把该 run 标记为
+`ctp-live`，并展示最新合约、当天行情时间、最新价及买卖一档。这个源提供真实市场快照，
+但属于模拟行情环境，并不等同于生产交易柜台或正式 YDApi 链路。
+
+`--ctp-repeat` 只负责用每个真实 Tick 驱动 Java/Aeron 压力测试；Dashboard 最新快照中的价格、
+数量、合约和市场时间都来自最后一个真实 Tick。真实 Tick 数和放大后的发布数会分别记录。
+
+## OpenCTP 7x24 历史行情验收
 
 附件中的 `openctp_ctp` 回调被封装成独立 Python 采集进程。采集进程把每条真实 CTP Tick
 编码为固定 156 字节 UDP 包，只发送到 `127.0.0.1`；Java 校验包头和连续 source sequence，
@@ -119,9 +142,12 @@ OpenCTP 7x24 一键验收：
 ```bash
 bash scripts/run_ctp_aeron_mvp.sh \
   --count 1000000 \
-  --ctp-repeat 10000 \
+  --ctp-repeat 1000000 \
   --sync-level 0
 ```
+
+休市时前置可能只发送订阅快照；`--ctp-repeat 1000000` 可用首个真实 CTP Tick 驱动百万条
+Aeron 压测。若设为 `10000`，则至少需要 100 个真实 Tick 回调，行情不连续时脚本会继续等待。
 
 Linux wheel 内部使用 `zh_CN.GB18030`；引导脚本通过 `localedef` 自动把该 locale 生成到
 隔离 runtime 并设置进程级 `LOCPATH`，无需 sudo，也不修改系统 locale。
@@ -132,7 +158,8 @@ Linux wheel 内部使用 `zh_CN.GB18030`；引导脚本通过 `localedef` 自动
 验收日志同时输出 `source_ticks` 和 `published`，两者不能混为一谈。
 
 OpenCTP 7x24 环境可能重放历史交易日，因此其 market timestamp 适合验证字段传输与计算
-稳定性，不适合衡量当前机器到真实交易所的实时链路延迟。
+稳定性，不适合衡量当前机器到真实交易所的实时链路延迟；Dashboard 会将该模式明确标记为
+历史回放并隐藏误导性的延迟数值。
 
 ## 构建自包含发布包
 
@@ -140,6 +167,6 @@ OpenCTP 7x24 环境可能重放历史交易日，因此其 market timestamp 适�
 bash aeron_mvp/build_release.sh
 ```
 
-生成 `result/ydtrader-aeron-mvp-java-0.2.0-linux-x86_64.tar.gz`，包含精简 Java 17
+生成 `result/ydtrader-aeron-mvp-java-0.3.0-linux-x86_64.tar.gz`，包含精简 Java 17
 运行时、Aeron runtime 和 Dashboard 静态资源；核心验收无需预装 Java或联网下载依赖，
 Dashboard 另需目标机已有 Python 3.9+。

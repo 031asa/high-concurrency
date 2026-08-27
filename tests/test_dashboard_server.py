@@ -24,13 +24,14 @@ class DashboardStatusTests(unittest.TestCase):
             run = root / "20260102T000000Z-2"
             run.mkdir()
             (run / "run.meta").write_text(
-                "run_id=latest\nsource=synthetic\nexpected_count=100\n"
+                "run_id=latest\nsource=synthetic\nlatency_mode=live\nexpected_count=100\n"
                 "sync_level=0\nstarted_at_utc=2026-01-02T00:00:00Z\n"
                 "status=SUCCESS\nrecording_id=42\n",
                 encoding="utf-8",
             )
             rows = [
-                {"timestamp_ms": 1, "status": "RUNNING", "received": 10, "rate_per_second": 20.0},
+                {"timestamp_ms": 1, "status": "RUNNING", "received": 10, "rate_per_second": 20.0,
+                 "quote": {"instrument": "IF2609", "last_price": 4012.4}},
                 {"timestamp_ms": 2, "status": "RUNNING", "received": 100, "rate_per_second": 50.0},
             ]
             (run / "compute-live.ndjson").write_text(
@@ -53,7 +54,9 @@ class DashboardStatusTests(unittest.TestCase):
 
         self.assertEqual("SUCCESS", status["dashboard_status"])
         self.assertEqual("latest", status["run"]["id"])
+        self.assertEqual("live", status["run"]["latency_mode"])
         self.assertEqual(2.0, status["compute"]["p95_ms"])
+        self.assertEqual("IF2609", status["compute"]["quote"]["instrument"])
         self.assertEqual(100, status["audit"]["received"])
         self.assertEqual([10, 100], [point["received"] for point in status["series"]])
 

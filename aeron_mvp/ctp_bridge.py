@@ -11,6 +11,7 @@ import struct
 import threading
 import time
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 
 from openctp_ctp import thostmduserapi as mdapi
 
@@ -76,7 +77,9 @@ class CtpMarketBridge(mdapi.CThostFtdcMdSpi):
         self.stop = threading.Event()
 
     def run(self) -> None:
-        self.api = mdapi.CThostFtdcMdApi.CreateFtdcMdApi()
+        flow_path = Path(self.args.flow_path)
+        flow_path.mkdir(parents=True, exist_ok=True)
+        self.api = mdapi.CThostFtdcMdApi.CreateFtdcMdApi(f"{flow_path}/")
         self.api.RegisterFront(self.args.front)
         self.api.RegisterSpi(self)
         self.api.Init()
@@ -167,6 +170,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--udp-host", default="127.0.0.1")
     parser.add_argument("--udp-port", type=int, default=24001)
     parser.add_argument("--repeat", type=int, default=10_000)
+    parser.add_argument("--flow-path", required=True)
     parser.add_argument("--idle-timeout-seconds", type=float, default=60.0)
     args = parser.parse_args()
     args.instruments = [item.strip() for item in args.instruments.split(",") if item.strip()]

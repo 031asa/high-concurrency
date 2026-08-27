@@ -519,6 +519,10 @@ public final class AeronMvp
 
         final long elapsedNs = System.nanoTime() - startedNs;
         final Summary summary = state.summary(recordingId, elapsedNs);
+        if (progressFile != null)
+        {
+            appendProgress(progressFile, state.serializeProgress(recordingId, elapsedNs, true));
+        }
         final String output = summary.serialize();
         System.out.print(output);
         if (summaryFile != null)
@@ -557,6 +561,35 @@ public final class AeronMvp
             StandardOpenOption.CREATE,
             StandardOpenOption.APPEND,
             StandardOpenOption.WRITE);
+    }
+
+    private static String jsonEscape(final String value)
+    {
+        final StringBuilder escaped = new StringBuilder(value.length() + 8);
+        for (int index = 0; index < value.length(); index++)
+        {
+            final char character = value.charAt(index);
+            switch (character)
+            {
+                case '"': escaped.append("\\\""); break;
+                case '\\': escaped.append("\\\\"); break;
+                case '\b': escaped.append("\\b"); break;
+                case '\f': escaped.append("\\f"); break;
+                case '\n': escaped.append("\\n"); break;
+                case '\r': escaped.append("\\r"); break;
+                case '\t': escaped.append("\\t"); break;
+                default:
+                    if (character < 0x20)
+                    {
+                        escaped.append(String.format(Locale.ROOT, "\\u%04x", (int)character));
+                    }
+                    else
+                    {
+                        escaped.append(character);
+                    }
+            }
+        }
+        return escaped.toString();
     }
 
     private static int runSelfTest()
@@ -850,6 +883,16 @@ public final class AeronMvp
         private double mean;
         private double m2;
         private double max = Double.NEGATIVE_INFINITY;
+        private boolean hasQuote;
+        private long lastQuoteSequence;
+        private String lastInstrument = "";
+        private String lastTradingDay = "";
+        private String lastMarketTimestampRaw = "";
+        private double lastPrice;
+        private double lastBidPrice;
+        private double lastAskPrice;
+        private long lastBidVolume;
+        private long lastAskVolume;
 
         private ConsumerState(final int expectedCount, final ConsumerMode mode)
         {
@@ -885,6 +928,18 @@ public final class AeronMvp
             expectedSequence = Math.max(expectedSequence, sequence + 1);
             received++;
 
+            lastQuoteSequence = sequence;
+            lastPrice = quoteDecoder.lastPrice();
+            lastBidPrice = quoteDecoder.bidPrice();
+            lastAskPrice = quoteDecoder.askPrice();
+            lastBidVolume = quoteDecoder.bidVolume();
+            lastAskVolume = quoteDecoder.askVolume();
+            final String sessionId = quoteDecoder.sessionId();
+            lastInstrument = quoteDecoder.instrument();
+            lastTradingDay = quoteDecoder.tradingDay();
+            lastMarketTimestampRaw = quoteDecoder.marketTimestampRaw();
+            hasQuote = true;
+
             if (mode == ConsumerMode.COMPUTE)
             {
                 if (quoteDecoder.timestampValid() != BooleanType.TRUE)
@@ -894,7 +949,6 @@ public final class AeronMvp
                 }
                 final long marketTimestampNs = quoteDecoder.marketTimestampNs();
                 final long localReceiveNs = quoteDecoder.localReceiveNs();
-                final String sessionId = quoteDecoder.sessionId();
                 if (sessions.add(sessionId))
                 {
                     return;
@@ -972,11 +1026,26 @@ public final class AeronMvp
             final double rate = seconds == 0 ? 0 : received / seconds;
             final double std = measured > 1 ? Math.sqrt(m2 / (measured - 1)) : 0;
             final double currentMax = max == Double.NEGATIVE_INFINITY ? 0 : max;
+            final String quote = hasQuote ? String.format(
+                Locale.ROOT,
+                "{\"sequence\":%d,\"instrument\":\"%s\",\"trading_day\":\"%s\"," +
+                    "\"market_time\":\"%s\",\"last_price\":%.10f," +
+                    "\"bid_price\":%.10f,\"bid_volume\":%d," +
+                    "\"ask_price\":%.10f,\"ask_volume\":%d}",
+                lastQuoteSequence,
+                jsonEscape(lastInstrument),
+                jsonEscape(lastTradingDay),
+                jsonEscape(lastMarketTimestampRaw),
+                lastPrice,
+                lastBidPrice,
+                lastBidVolume,
+                lastAskPrice,
+                lastAskVolume) : "null";
             return String.format(
                 Locale.ROOT,
                 "{\"timestamp_ms\":%d,\"mode\":\"%s\",\"status\":\"%s\"," +
                     "\"finished\":%s,\"recording_id\":%d,\"expected\":%d," +
-                    "\"received\":%d,\"measured\":%d,\"gaps\":%d," +
+                    "\"received\":%d,\"quote\":%s,\"measured\":%d,\"gaps\":%d," +
                     "\"duplicates\":%d,\"invalid_timestamps\":%d," +
                     "\"mean_ms\":%.6f,\"std_ms\":%.6f,\"p95_ms\":null," +
                     "\"max_ms\":%.6f,\"elapsed_seconds\":%.6f," +
@@ -988,6 +1057,7 @@ public final class AeronMvp
                 recordingId,
                 expectedCount,
                 received,
+                quote,
                 measured,
                 gaps,
                 duplicates,
