@@ -86,9 +86,12 @@ def _latest_run(result_root: Path) -> Optional[Path]:
 def _consumer_payload(run_dir: Path, name: str) -> tuple[Dict[str, Any], List[Dict[str, Any]]]:
     rows = _read_progress(run_dir / f"{name}-live.ndjson")
     current: Dict[str, Any] = dict(rows[-1]) if rows else {}
+    retained_fields = ("quote", "latency_by_time", "latency_by_contract")
     for row in reversed(rows):
-        if row.get("quote"):
-            current["quote"] = row["quote"]
+        for field in retained_fields:
+            if field not in current and field in row:
+                current[field] = row[field]
+        if all(field in current for field in retained_fields):
             break
     final = _summary(run_dir / f"{name}-live.summary")
     if final:

@@ -31,7 +31,17 @@ class DashboardStatusTests(unittest.TestCase):
             )
             rows = [
                 {"timestamp_ms": 1, "status": "RUNNING", "received": 10, "rate_per_second": 20.0,
-                 "quote": {"instrument": "IF2609", "last_price": 4012.4}},
+                 "quote": {"instrument": "IF2609", "last_price": 4012.4},
+                 "latency_by_time": [{
+                     "time_bin": "2026-01-02T09:30:00+08:00", "count": 9,
+                     "mean_ms": 1.25, "std_ms": 0.5, "p50_ms": 1.0,
+                     "p90_ms": 1.8, "p95_ms": 2.0, "p99_ms": 2.8, "max_ms": 3.0,
+                 }],
+                 "latency_by_contract": [{
+                     "contract": "IF2609", "count": 9,
+                     "mean_ms": 1.25, "std_ms": 0.5, "p50_ms": 1.0,
+                     "p90_ms": 1.8, "p95_ms": 2.0, "p99_ms": 2.8, "max_ms": 3.0,
+                 }]},
                 {"timestamp_ms": 2, "status": "RUNNING", "received": 100, "rate_per_second": 50.0},
             ]
             (run / "compute-live.ndjson").write_text(
@@ -57,6 +67,12 @@ class DashboardStatusTests(unittest.TestCase):
         self.assertEqual("live", status["run"]["latency_mode"])
         self.assertEqual(2.0, status["compute"]["p95_ms"])
         self.assertEqual("IF2609", status["compute"]["quote"]["instrument"])
+        self.assertEqual(
+            "2026-01-02T09:30:00+08:00",
+            status["compute"]["latency_by_time"][0]["time_bin"],
+        )
+        self.assertEqual("IF2609", status["compute"]["latency_by_contract"][0]["contract"])
+        self.assertEqual(2.8, status["compute"]["latency_by_contract"][0]["p99_ms"])
         self.assertEqual(100, status["audit"]["received"])
         self.assertEqual([10, 100], [point["received"] for point in status["series"]])
 

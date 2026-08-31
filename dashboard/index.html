@@ -63,6 +63,9 @@
     .chart-area { fill: url(#areaGradient); opacity: .32; }
     #latency-line { stroke: var(--blue); }
     .table-card { padding: 20px; }
+    .latency-table { min-width: 860px; }
+    .latency-table td:first-child, .latency-table th:first-child { white-space: nowrap; }
+    .empty-row { color: var(--muted); text-align: center !important; }
     .section-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 18px; }
     .depth-control { display: flex; align-items: center; gap: 8px; color: var(--muted); font-size: 12px; white-space: nowrap; }
     .depth-control select { color: var(--text); background: var(--panel-2); border: 1px solid var(--line); border-radius: 8px; padding: 6px 9px; }
@@ -151,6 +154,28 @@
     </section>
 
     <section class="table-card" style="margin-bottom:14px">
+      <h2 class="section-title">15 分钟延迟分布</h2>
+      <div class="section-meta">按行情时间分箱 · 实时在线聚合 · 单位 ms</div>
+      <div class="table-wrap">
+        <table class="latency-table">
+          <thead><tr><th>时间分箱</th><th>Count</th><th>Mean</th><th>Std</th><th>P50</th><th>P90</th><th>P95</th><th>P99</th><th>Max</th></tr></thead>
+          <tbody id="time-latency-body"><tr><td class="empty-row" colspan="9">等待延迟样本</td></tr></tbody>
+        </table>
+      </div>
+    </section>
+
+    <section class="table-card" style="margin-bottom:14px">
+      <h2 class="section-title">合约延迟分布</h2>
+      <div class="section-meta">按合约汇总 · 分位数使用三位有效数字 HdrHistogram</div>
+      <div class="table-wrap">
+        <table class="latency-table">
+          <thead><tr><th>合约</th><th>Count</th><th>Mean</th><th>Std</th><th>P50</th><th>P90</th><th>P95</th><th>P99</th><th>Max</th></tr></thead>
+          <tbody id="contract-latency-body"><tr><td class="empty-row" colspan="9">等待延迟样本</td></tr></tbody>
+        </table>
+      </div>
+    </section>
+
+    <section class="table-card" style="margin-bottom:14px">
       <div class="section-head">
         <div>
           <h2 class="section-title">最新采样行情</h2>
@@ -197,6 +222,32 @@
       if (value === null || value === undefined || Number.isNaN(Number(value))) return '—';
       return Number(value).toLocaleString('zh-CN', { maximumFractionDigits: digits, minimumFractionDigits: digits });
     };
+    const escapeHtml = value => String(value ?? '').replace(
+      /[&<>"']/g,
+      character => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[character]
+    );
+    function renderLatencyTable(bodyId, rows, dimension, historicalLatency) {
+      const body = $(bodyId);
+      if (historicalLatency) {
+        body.innerHTML = '<tr><td class="empty-row" colspan="9">历史回放不展示实时链路延迟</td></tr>';
+        return;
+      }
+      const values = Array.isArray(rows) ? rows : [];
+      if (!values.length) {
+        body.innerHTML = '<tr><td class="empty-row" colspan="9">等待延迟样本</td></tr>';
+        return;
+      }
+      const visible = dimension === 'time_bin' ? values.slice(-96) : values;
+      body.innerHTML = visible.map(row => {
+        const rawLabel = row[dimension] || '—';
+        const label = dimension === 'time_bin' ? String(rawLabel).replace('T', ' ') : rawLabel;
+        return `<tr><td>${escapeHtml(label)}</td><td>${number(row.count)}</td>` +
+          `<td>${number(row.mean_ms, 3)}</td><td>${number(row.std_ms, 3)}</td>` +
+          `<td>${number(row.p50_ms, 3)}</td><td>${number(row.p90_ms, 3)}</td>` +
+          `<td>${number(row.p95_ms, 3)}</td><td>${number(row.p99_ms, 3)}</td>` +
+          `<td>${number(row.max_ms, 3)}</td></tr>`;
+      }).join('');
+    }
     let latestQuote = {};
     function renderDepth(quote) {
       const requested = Number($('depth-select').value || 5);
@@ -266,6 +317,10 @@
       $('p95').textContent = historicalLatency ? '—' : number(compute.p95_ms, 3);
       $('mean-hint').textContent = historicalLatency ? '历史行情时间，不计算实时链路延迟' : '本地接收时间 − 行情时间';
       $('p95-hint').textContent = historicalLatency ? '切换实时行情源后启用' : '完成后给出精确分位值';
+      renderLatencyTable('time-latency-body', compute.latency_by_time, 'time_bin', historicalLatency);
+      renderLatencyTable(
+        'contract-latency-body', compute.latency_by_contract, 'contract', historicalLatency
+      );
       for (const [prefix, value] of [['compute', compute], ['audit', audit]]) {
         setStatusCell(`${prefix}-status`, value.status);
         $(`${prefix}-received`).textContent = number(value.received || 0);

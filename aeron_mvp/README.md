@@ -96,6 +96,9 @@ bash scripts/run_dashboard.sh --port 8080
 Dashboard 只读取 Compute/Audit 已写出的 NDJSON 和 summary，不订阅发布流、不参与 Aeron
 flow control。页面的“最新采样行情”固定携带五档槽位，可选显示 1～5 档；
 YDApi 只填写一档，CTP 最多填写五档，任何缺失档位都输出空值而不伪造数据。
+延迟统计同时按中国时区的 15 分钟行情时间窗口和合约聚合，输出
+`count / mean / std / p50 / p90 / p95 / p99 / max`。Compute 消费线程以 O(1) 方式更新
+HdrHistogram，不把逐笔延迟写磁盘；均值和样本标准差使用在线算法，分位数保留三位有效数字。
 全量行情仍只保存在 Archive。实时阶段显示 mean/std/max；
 精确 P95 在计算完成后由同一套统计代码写入最终快照。
 

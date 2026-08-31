@@ -15,6 +15,7 @@ import io.aeron.archive.client.AeronArchive;
 import io.aeron.archive.codecs.SourceLocation;
 import io.aeron.archive.status.RecordingPos;
 import io.aeron.driver.MediaDriver;
+import io.aeron.shadow.org.HdrHistogram.DoubleHistogram;
 import org.agrona.concurrent.UnsafeBuffer;
 import org.agrona.concurrent.status.CountersReader;
 
@@ -31,6 +32,9 @@ import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
 import java.nio.file.StandardOpenOption;
 import java.time.Duration;
+import java.time.Instant;
+import java.time.ZoneId;
+import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.HashMap;
@@ -67,6 +71,8 @@ public final class AeronMvp
     private static final int ADAPTER_TIMESTAMP_VALID_FLAG = 1;
     private static final int MAX_DEPTH_LEVELS = 5;
     private static final int ADAPTER_MAX_REPEAT = 1_000_000;
+    private static final long LATENCY_TIME_BIN_SECONDS = Duration.ofMinutes(15).toSeconds();
+    private static final ZoneId CHINA_ZONE = ZoneId.of("Asia/Shanghai");
 
     private AeronMvp()
     {
@@ -712,6 +718,19 @@ public final class AeronMvp
         {
             throw new IllegalStateException("SBE market quote round-trip failed");
         }
+        final LatencyDistribution distribution = new LatencyDistribution();
+        distribution.record(75.0);
+        distribution.record(81.0);
+        distribution.record(146.0);
+        final long sampleTimeBin = Math.floorDiv(
+            Instant.parse("2026-08-28T01:52:00Z").getEpochSecond(), LATENCY_TIME_BIN_SECONDS) *
+            LATENCY_TIME_BIN_SECONDS;
+        if (distribution.count != 3 || Math.abs(distribution.mean - 100.6666667) > 0.0001 ||
+            Math.abs(distribution.percentile(50.0) - 81.0) > 0.1 ||
+            !"2026-08-28T09:45:00+08:00".equals(formatTimeBin(sampleTimeBin)))
+        {
+            throw new IllegalStateException("latency distribution self-test failed");
+        }
         System.out.printf(
             Locale.ROOT,
             "AERON_MVP_SELFTEST result=SUCCESS encoded_length=%d schema_id=%d template_id=%d%n",
@@ -960,6 +979,8 @@ public final class AeronMvp
         private final MarketQuoteDecoder quoteDecoder = new MarketQuoteDecoder();
         private final Set<String> sessions = new HashSet<>();
         private final double[] latencyValues;
+        private final Map<Long, LatencyDistribution> latencyByTimeBin = new HashMap<>();
+        private final Map<String, LatencyDistribution> latencyByInstrument = new HashMap<>();
         private long received;
         private long expectedSequence = 1;
         private long gaps;
@@ -1066,6 +1087,14 @@ public final class AeronMvp
                 mean += delta / measured;
                 m2 += delta * (latencyMs - mean);
                 max = Math.max(max, latencyMs);
+                final long marketEpochSeconds = Math.floorDiv(marketTimestampNs, 1_000_000_000L);
+                final long timeBin = Math.floorDiv(
+                    marketEpochSeconds, LATENCY_TIME_BIN_SECONDS) * LATENCY_TIME_BIN_SECONDS;
+                latencyByTimeBin.computeIfAbsent(timeBin, key -> new LatencyDistribution())
+                    .record(latencyMs);
+                final String instrument = lastInstrument.isEmpty() ? "UNKNOWN" : lastInstrument;
+                latencyByInstrument.computeIfAbsent(instrument, key -> new LatencyDistribution())
+                    .record(latencyMs);
             }
 
             if (received % 100_000 == 0 || received == expectedCount)
@@ -1133,6 +1162,8 @@ public final class AeronMvp
             final double std = measured > 1 ? Math.sqrt(m2 / (measured - 1)) : 0;
             final double currentMax = max == Double.NEGATIVE_INFINITY ? 0 : max;
             final String depth = serializeDepth();
+            final String latencyTimeBins = serializeTimeBinStats();
+            final String latencyContracts = serializeContractStats();
             final String quote = hasQuote ? String.format(
                 Locale.ROOT,
                 "{\"sequence\":%d,\"instrument\":\"%s\",\"trading_day\":\"%s\"," +
@@ -1158,7 +1189,8 @@ public final class AeronMvp
                     "\"received\":%d,\"quote\":%s,\"measured\":%d,\"gaps\":%d," +
                     "\"duplicates\":%d,\"invalid_timestamps\":%d," +
                     "\"mean_ms\":%.6f,\"std_ms\":%.6f,\"p95_ms\":null," +
-                    "\"max_ms\":%.6f,\"elapsed_seconds\":%.6f," +
+                    "\"max_ms\":%.6f,\"latency_by_time\":%s," +
+                    "\"latency_by_contract\":%s,\"elapsed_seconds\":%.6f," +
                     "\"rate_per_second\":%.3f}%n",
                 System.currentTimeMillis(),
                 mode,
@@ -1175,8 +1207,44 @@ public final class AeronMvp
                 mean,
                 std,
                 currentMax,
+                latencyTimeBins,
+                latencyContracts,
                 seconds,
                 rate);
+        }
+
+        private String serializeTimeBinStats()
+        {
+            final List<Long> keys = new ArrayList<>(latencyByTimeBin.keySet());
+            keys.sort(Long::compareTo);
+            final StringBuilder json = new StringBuilder(256).append('[');
+            for (int index = 0; index < keys.size(); index++)
+            {
+                if (index > 0)
+                {
+                    json.append(',');
+                }
+                final long key = keys.get(index);
+                latencyByTimeBin.get(key).appendJson(json, "time_bin", formatTimeBin(key));
+            }
+            return json.append(']').toString();
+        }
+
+        private String serializeContractStats()
+        {
+            final List<String> keys = new ArrayList<>(latencyByInstrument.keySet());
+            keys.sort(String::compareTo);
+            final StringBuilder json = new StringBuilder(256).append('[');
+            for (int index = 0; index < keys.size(); index++)
+            {
+                if (index > 0)
+                {
+                    json.append(',');
+                }
+                final String key = keys.get(index);
+                latencyByInstrument.get(key).appendJson(json, "contract", key);
+            }
+            return json.append(']').toString();
         }
 
         private String serializeDepth()
@@ -1207,6 +1275,62 @@ public final class AeronMvp
         private static String nullableVolume(final long value)
         {
             return value > 0 ? Long.toString(value) : "null";
+        }
+    }
+
+    private static String formatTimeBin(final long epochSeconds)
+    {
+        return DateTimeFormatter.ISO_OFFSET_DATE_TIME.format(
+            Instant.ofEpochSecond(epochSeconds).atZone(CHINA_ZONE).toOffsetDateTime());
+    }
+
+    private static final class LatencyDistribution
+    {
+        private final DoubleHistogram histogram = new DoubleHistogram(3);
+        private long count;
+        private double mean;
+        private double m2;
+        private double max = Double.NEGATIVE_INFINITY;
+
+        private void record(final double value)
+        {
+            histogram.recordValue(value);
+            count++;
+            final double delta = value - mean;
+            mean += delta / count;
+            m2 += delta * (value - mean);
+            max = Math.max(max, value);
+        }
+
+        private double std()
+        {
+            return count > 1 ? Math.sqrt(m2 / (count - 1)) : 0;
+        }
+
+        private double percentile(final double percentile)
+        {
+            return count == 0 ? 0 : Math.min(max, histogram.getValueAtPercentile(percentile));
+        }
+
+        private void appendJson(
+            final StringBuilder json,
+            final String dimension,
+            final String label)
+        {
+            json.append("{\"").append(dimension).append("\":\"")
+                .append(jsonEscape(label)).append("\",\"count\":").append(count)
+                .append(String.format(
+                    Locale.ROOT,
+                    ",\"mean_ms\":%.6f,\"std_ms\":%.6f," +
+                        "\"p50_ms\":%.3f,\"p90_ms\":%.3f,\"p95_ms\":%.3f," +
+                        "\"p99_ms\":%.3f,\"max_ms\":%.3f}",
+                    mean,
+                    std(),
+                    percentile(50.0),
+                    percentile(90.0),
+                    percentile(95.0),
+                    percentile(99.0),
+                    max == Double.NEGATIVE_INFINITY ? 0 : max));
         }
     }
 

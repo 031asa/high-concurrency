@@ -98,3 +98,5 @@ flowchart TB
 - 官方 CTP 实时模拟行情用于备用快照验收；OpenCTP TTS 仅作 7×24 历史回放备用。
 - Dashboard 当前从 Compute/Audit 的下游快照和最终 summary 读取数据，不订阅 Publisher，
   不参与 Aeron flow control；告警推送和 WebSocket 属于后续规划。
+- Compute 使用 HdrHistogram 在线维护按中国时区 15 分钟行情窗口和按合约的延迟分布，
+  输出 `count / mean / std / p50 / p90 / p95 / p99 / max`，不写逐笔延迟明细。

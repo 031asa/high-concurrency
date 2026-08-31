@@ -3,7 +3,7 @@ set -euo pipefail
 
 SCRIPT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
 PROJECT_ROOT=$(cd -- "$SCRIPT_DIR/.." && pwd)
-VERSION=0.5.0
+VERSION=0.6.0
 PLATFORM=linux-x86_64
 DIST_NAME="ydtrader-aeron-mvp-java-${VERSION}-${PLATFORM}"
 RESULT_DIR="$PROJECT_ROOT/result"

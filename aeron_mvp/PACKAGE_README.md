@@ -1,4 +1,4 @@
-# YDTrader Aeron MVP Java 0.5.0
+# YDTrader Aeron MVP Java 0.6.0
 
 这是 Linux x86_64 自包含验收包，内含精简 Java 17 运行时、Aeron 1.51.0、已编译
 SBE codec 和行情 MVP。目标机不需要安装 Java，也不需要联网下载依赖。
@@ -6,8 +6,8 @@ SBE codec 和行情 MVP。目标机不需要安装 Java，也不需要联网下�
 ## 快速验收
 
 ```bash
-tar -xzf ydtrader-aeron-mvp-java-0.5.0-linux-x86_64.tar.gz
-cd ydtrader-aeron-mvp-java-0.5.0-linux-x86_64
+tar -xzf ydtrader-aeron-mvp-java-0.6.0-linux-x86_64.tar.gz
+cd ydtrader-aeron-mvp-java-0.6.0-linux-x86_64
 sha256sum -c manifest.sha256
 bash scripts/run_aeron_mvp.sh --count 100000 --sync-level 0
 ```
@@ -46,6 +46,9 @@ bash scripts/run_dashboard.sh --port 8080
 进入行情发布或 Aeron flow-control 链路。“最新采样行情”可查看合约、行情时间、最新价、
 一到五档买卖价和数量；档位可选，数据源未提供的档位显示为空。
 YDApi 当前只有一档，CTP 支持五档。全量原始行情仍保存在 Archive。
+Dashboard 还按 15 分钟行情时间窗口和合约展示
+`count / mean / std / p50 / p90 / p95 / p99 / max`，分位数由下游 Compute 的
+HdrHistogram 在线聚合，不在发布链路上执行，也不会逐笔写盘。
 
 ## 当前边界
 
