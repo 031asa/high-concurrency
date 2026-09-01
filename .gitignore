@@ -14,9 +14,7 @@ result/*
 *.so
 *.pyd
 *.c
-ydcore/_public_key.py
 *.private.pem
-*.license.json
 windows-time.json
 linux-time.json
 小白技术指导手册.md

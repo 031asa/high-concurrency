@@ -43,3 +43,31 @@ def test_manylinux_build_pins_are_mirrored_in_environment():
     ).read_text(encoding="utf-8").splitlines()
     for requirement in requirements:
         assert f"- {requirement}" in environment
+
+
+def test_runtime_has_no_project_license_or_encryption_layer():
+    removed = [
+        PROJECT_ROOT / "ydcore" / "licensing.py",
+        PROJECT_ROOT / "build_tools" / "generate_keypair.py",
+        PROJECT_ROOT / "build_tools" / "issue_license.py",
+        PROJECT_ROOT / "install" / "ydtrader-destroy",
+    ]
+    assert not any(path.exists() for path in removed)
+    environment = (PROJECT_ROOT / "environment.yml").read_text(encoding="utf-8")
+    requirements = (PROJECT_ROOT / "requirements-build.txt").read_text(encoding="utf-8")
+    for dependency in ("argon2-cffi", "cryptography"):
+        assert dependency not in environment
+        assert dependency not in requirements
+
+
+def test_release_build_and_installer_need_no_keys_or_activation():
+    build = (PROJECT_ROOT / "build_tools" / "build_release.py").read_text(
+        encoding="utf-8"
+    )
+    installer = (PROJECT_ROOT / "install" / "install_linux.sh").read_text(
+        encoding="utf-8"
+    )
+    forbidden = ("public-key", "private-key", "install_manifest.sig", "activate")
+    for value in forbidden:
+        assert value not in build
+        assert value not in installer

@@ -1,3 +1,3 @@
-"""Protected core for the YD trading compliance client."""
+"""YDTrader business modules for trading, monitoring, and market data."""
 
-__all__ = ["licensing", "marketdata", "monitoring", "trading"]
+__all__ = ["marketdata", "monitoring", "trading"]

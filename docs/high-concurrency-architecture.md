@@ -100,3 +100,10 @@ flowchart TB
   不参与 Aeron flow control；告警推送和 WebSocket 属于后续规划。
 - Compute 使用 HdrHistogram 在线维护按中国时区 15 分钟行情窗口和按合约的延迟分布，
   输出 `count / mean / std / p50 / p90 / p95 / p99 / max`，不写逐笔延迟明细。
+
+## 无加密运行边界
+
+- 项目不再包含许可证、机器绑定、运行密码、激活、到期销毁或加密状态；业务入口直接分发到原有模块。
+- UDP loopback、SBE、Aeron IPC、Archive、NDJSON 和 Dashboard API 均不增加项目级加密层，消息结构与并发路径保持不变。
+- YDApi/CTP 的柜台账号密码仍只从 leader 本机配置读取，用于登录数据源或交易柜台，不写入 SBE 消息、Aeron Archive、统计结果或 Dashboard。
+- 去掉项目加密不等于去掉交易风控；真实报单的 `--send`、策略身份、暂停标志、报单和撤单阈值继续生效。

@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
-"""Build and sign the CPython 3.9 Linux standalone release."""
+"""Build the CPython 3.9 Linux standalone release."""
 
-import argparse
 import hashlib
 import os
 import platform
@@ -31,18 +30,6 @@ def sha256(path):
     return digest.hexdigest()
 
 
-def load_private_key(path):
-    from getpass import getpass
-    from cryptography.hazmat.primitives.serialization import load_pem_private_key
-
-    raw = path.read_bytes()
-    try:
-        return load_pem_private_key(raw, password=None)
-    except TypeError:
-        password = getpass("发证私钥密码: ").encode("utf-8")
-        return load_pem_private_key(raw, password=password)
-
-
 def copy_release_support_files(release):
     docs = release / "docs"
     tools = release / "tools"
@@ -66,32 +53,27 @@ def copy_release_support_files(release):
 
 
 def main(argv=None):
-    parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--public-key", required=True, type=Path)
-    parser.add_argument("--private-key", required=True, type=Path)
-    args = parser.parse_args(argv)
+    argv = sys.argv[1:] if argv is None else argv
+    if argv:
+        raise SystemExit("build_release.py takes no arguments")
 
     if sys.version_info[:2] != (3, 9):
         raise SystemExit("release must be built with CPython 3.9")
     if sys.platform != "linux" or platform.machine().lower() not in {"x86_64", "amd64"}:
         raise SystemExit("release target must be Linux x86_64")
-    if not args.public_key.is_file() or not args.private_key.is_file():
-        raise SystemExit("key file not found")
-
     shutil.rmtree(BUILD_ROOT / "nuitka", ignore_errors=True)
     shutil.rmtree(RESULT_ROOT / RELEASE_NAME, ignore_errors=True)
-    run(sys.executable, "build_tools/build_cython.py", "--clean", "--public-key", args.public_key)
+    run(sys.executable, "build_tools/build_cython.py", "--clean")
     run(
         sys.executable,
         "-m",
         "nuitka",
         "--standalone",
+        "--static-libpython=no",
         "--assume-yes-for-downloads",
         "--remove-output",
         "--output-dir=build/nuitka",
         "--output-filename=ydtrader",
-        "--include-package=argon2",
-        "--include-package=cryptography",
         "--include-module=pyyd",
         "--include-module=ydcore.trading",
         "--include-module=ydcore.monitoring",
@@ -116,7 +98,6 @@ def main(argv=None):
         app / "data" / "error_code.csv",
     )
     shutil.copytree(PROJECT_ROOT / "install", release / "install")
-    shutil.copy2(args.public_key, release / "install" / "ydtrader-public.pem")
     copy_release_support_files(release)
     for required in (app / "pyyd.so", app / "yd.so"):
         if not required.is_file():
@@ -134,9 +115,6 @@ def main(argv=None):
         lines.append(f"{sha256(path)}  {relative}\n")
     manifest = release / "install_manifest.sha256"
     manifest.write_text("".join(lines), encoding="ascii")
-    private_key = load_private_key(args.private_key)
-    (release / "install_manifest.sig").write_bytes(private_key.sign(manifest.read_bytes()))
-    os.chmod(release / "install" / "ydtrader-destroy", 0o755)
     os.chmod(release / "install" / "install_linux.sh", 0o755)
 
     archive = RESULT_ROOT / f"{RELEASE_NAME}.tar.gz"

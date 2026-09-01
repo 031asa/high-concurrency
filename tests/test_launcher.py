@@ -1,48 +1,44 @@
 import sys
+from types import SimpleNamespace
 
-from ydcore import launcher, licensing
-
-
-def test_unauthorized_business_never_imports_core_or_vendor(monkeypatch):
-    for name in ("ydcore.trading", "pyyd"):
-        sys.modules.pop(name, None)
-    monkeypatch.setattr(launcher.getpass, "getpass", lambda _prompt: "password")
-
-    def missing(_feature, _password):
-        raise licensing.LicenseMissingError("not activated")
-
-    monkeypatch.setattr(launcher.licensing, "verify_business_access", missing)
-    assert launcher.main(["order"]) == 20
-    assert "ydcore.trading" not in sys.modules
-    assert "pyyd" not in sys.modules
+from ydcore import launcher
 
 
-def test_invalid_password_is_limited_to_three_attempts(monkeypatch):
-    attempts = []
+def test_business_command_dispatches_directly_without_license_or_password(monkeypatch):
+    calls = []
 
-    def prompt(_prompt):
-        attempts.append(1)
-        return "wrong"
+    def load(name):
+        calls.append(name)
+        return SimpleNamespace(run=lambda argv: 7 if argv == ["--probe"] else 1)
 
-    monkeypatch.setattr(launcher.getpass, "getpass", prompt)
+    monkeypatch.setattr(launcher.importlib, "import_module", load)
+    assert launcher.main(["order", "--probe"]) == 7
+    assert calls == ["ydcore.trading"]
+
+
+def test_top_level_help_does_not_import_business_modules(monkeypatch, capsys):
     monkeypatch.setattr(
-        launcher.licensing,
-        "verify_business_access",
-        lambda *_args: (_ for _ in ()).throw(licensing.LicenseInvalidError("bad")),
-    )
-    assert launcher.main(["monitor"]) == 21
-    assert len(attempts) == 3
-    assert "ydcore.monitoring" not in sys.modules
-    assert "pyyd" not in sys.modules
-
-
-def test_top_level_help_and_machine_code_need_no_password(monkeypatch, capsys):
-    monkeypatch.setattr(launcher.licensing, "machine_code", lambda: "f" * 64)
-    monkeypatch.setattr(
-        launcher.getpass,
-        "getpass",
-        lambda _prompt: (_ for _ in ()).throw(AssertionError("unexpected password prompt")),
+        launcher.importlib,
+        "import_module",
+        lambda _name: (_ for _ in ()).throw(AssertionError("unexpected import")),
     )
     assert launcher.main(["--help"]) == 0
-    assert launcher.main(["machine-code"]) == 0
-    assert "f" * 64 in capsys.readouterr().out
+    output = capsys.readouterr().out
+    assert "order" in output
+    assert "activate" not in output
+    assert "machine-code" not in output
+
+
+def test_removed_license_commands_are_rejected(capsys):
+    for command in ("activate", "machine-code"):
+        assert launcher.main([command]) == 2
+    assert "未知命令" in capsys.readouterr().err
+
+
+def test_keyboard_interrupt_keeps_existing_exit_code(monkeypatch):
+    monkeypatch.setattr(
+        launcher,
+        "_dispatch",
+        lambda *_args: (_ for _ in ()).throw(KeyboardInterrupt()),
+    )
+    assert launcher.main(["monitor"]) == 130
