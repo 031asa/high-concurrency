@@ -8,7 +8,8 @@ __pycache__/
 *.pyc
 .venv/
 build/
-result/
+result/*
+!result/.gitkeep
 .pytest_cache/
 *.so
 *.pyd

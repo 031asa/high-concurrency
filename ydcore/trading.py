@@ -65,7 +65,7 @@ def load_json(path):
             raise ValueError(f"JSON 解析失败: {e}")
 
 # ---------- 错误码工具 ----------
-def load_error_dict(path=PROJECT_ROOT / "error_code.csv"):
+def load_error_dict(path=PROJECT_ROOT / "data" / "error_code.csv"):
     error_dict = {}
     with open(path, newline='', encoding='utf-8-sig') as f:
         reader = csv.reader(f)

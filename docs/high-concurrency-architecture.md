@@ -10,7 +10,7 @@ flowchart TB
         SIM["Synthetic Publisher<br/>确定性压力测试"]
         YDA["Python YDApi Bridge<br/>非阻塞回调转发"]
         CTB["Python CTP Bridge<br/>原生回调轻量转发"]
-        UDP["156 Byte 固定二进制包<br/>UDP Loopback"]
+        UDP["v2 284 Byte 五档二进制包<br/>兼容 v1 156 Byte｜UDP Loopback"]
         JP["Java Market Publisher<br/>publish / publish-adapter"]
 
         YD --> YDA --> UDP

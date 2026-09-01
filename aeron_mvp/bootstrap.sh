@@ -33,7 +33,8 @@ download_and_verify() {
     fi
     part="${destination}.part.$$"
     trap 'rm -f -- "$part"' RETURN
-    curl --fail --location --retry 3 --silent --show-error --output "$part" "$url"
+    curl --fail --location --retry 3 --retry-all-errors \
+        --connect-timeout 15 --silent --show-error --output "$part" "$url"
     printf '%s  %s\n' "$checksum" "$part" | "$checksum_command" --check --status || {
         printf 'dependency checksum mismatch: %s\n' "$destination" >&2
         return 1

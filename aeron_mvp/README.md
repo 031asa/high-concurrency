@@ -149,7 +149,8 @@ bash scripts/run_ctp_live_aeron_mvp.sh \
 ## OpenCTP 7x24 历史行情验收
 
 附件中的 `openctp_ctp` 回调被封装成独立 Python 采集进程。采集进程把每条真实 CTP Tick
-编码为固定 156 字节 UDP 包，只发送到 `127.0.0.1`；Java 校验包头和连续 source sequence，
+编码为 v2 284 字节五档 UDP 包，只发送到 `127.0.0.1`；Java 仍兼容旧 v1 156 字节包，
+并校验包头和连续 source sequence，
 再转换为原有 SBE `MarketQuote` 并写入 Aeron Archive。
 
 OpenCTP 官方说明：TTS 柜台虽然兼容 CTPAPI，但必须把 CTP 原厂 `dll/so` 替换为同版本
@@ -160,10 +161,10 @@ TTS 动态库；若误用原厂库，`OnFrontDisconnected` 会持续报告 `4097
 bash scripts/bootstrap_ctp_tts.sh
 ```
 
-脚本创建 `result/ctp-tts-runtime/venv`，安装 `openctp-ctp==6.7.11.0`，下载并校验官方
-`tts_6.7.11.zip`，只替换这个隔离虚拟环境中的行情 `.so`。原项目 `.venv` 不受影响，
-因此以后仍可单独使用 CTP 原厂柜台。需要离线安装时可通过 `TTS_SDK_ZIP` 指向已经下载
-的官方 ZIP，通过 `UV_BIN` 指定 `uv`。
+脚本根据根 `environment.yml` 创建 `result/ctp-tts-runtime/conda`，下载并校验官方
+`tts_6.7.11.zip`，只替换这个隔离 Conda 前缀中的行情 `.so`。官方 CTP Live 使用
+独立的 `result/ctp-live-runtime/conda`，两个原生库不会互相覆盖。需要离线安装时可通过
+`TTS_SDK_ZIP` 指向已经下载的官方 ZIP。
 
 OpenCTP 7x24 一键验收：
 
@@ -195,6 +196,6 @@ OpenCTP 7x24 环境可能重放历史交易日，因此其 market timestamp 适�
 bash aeron_mvp/build_release.sh
 ```
 
-生成 `result/ydtrader-aeron-mvp-java-0.5.0-linux-x86_64.tar.gz`，包含精简 Java 17
+生成 `result/ydtrader-aeron-mvp-java-0.6.1-linux-x86_64.tar.gz`，包含精简 Java 17
 运行时、Aeron runtime 和 Dashboard 静态资源；核心验收无需预装 Java或联网下载依赖，
-Dashboard 另需目标机已有 Python 3.9+。
+Dashboard 和 Python bridge 需目标机安装 Miniconda，并按包内 `environment.yml` 创建环境。

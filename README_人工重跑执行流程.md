@@ -1,12 +1,8 @@
 # YDTrader 傻瓜式人工重跑执行流程
 
-这份文档只讲照着做的顺序。Windows 目录
-
-```text
-C:\Users\Hello\Documents\基础环境配置\outputs\share\share\yd_trader
-```
-
-是唯一源码目录；WSL 只用于 Linux 编译和测试。不要在 WSL 副本里长期改代码，也不要把 Windows `.venv` 拿到 Linux 使用。
+这份文档只讲照着做的顺序。唯一开发仓库位于 WSL2 Linux 文件系统中的
+`~/projects/high-concurrency`；Windows 只用于访问 WSL 文件、运行宿主工具和传递配置，
+不得把 Windows Python、虚拟环境或编译产物带入项目。
 
 ## 一、只想在 leader Linux 机器重新运行
 
@@ -108,7 +104,7 @@ tail -n 100 /opt/ydtrader/logs/monitor.log
 
 ## 三、开发机改完代码后重新测试
 
-所有代码先在 Windows 主项目目录修改并提交。然后打开 PowerShell，把 Windows 仓库同步到 WSL 检查副本：
+所有代码都在 WSL2 Linux 仓库修改、验证和提交。打开 PowerShell 进入 WSL：
 
 ```powershell
 wsl -d Ubuntu-24.04
@@ -117,28 +113,27 @@ wsl -d Ubuntu-24.04
 进入 WSL 后执行：
 
 ```bash
-cd ~/projects/yd_trader
+cd ~/projects/high-concurrency
 git pull --ff-only
 ```
 
-如果这台机器第一次测试，安装 Linux 原生 Python 3.9 环境：
+首次测试或依赖清单变化后，创建或更新 Linux 原生 Miniconda 环境：
 
 ```bash
-cd ~/projects/yd_trader
-uv venv --python 3.9 .venv
-uv pip install --python .venv/bin/python -r requirements-build.txt
-uv pip install --python .venv/bin/python \
-  vendor/wheels/pyyd-1.486.96.99-cp39-cp39-linux_x86_64.whl
+cd ~/projects/high-concurrency
+conda env update -f environment.yml --prune
+conda activate ydtrader-high-concurrency
 ```
 
 每次代码修改后必须执行：
 
 ```bash
-cd ~/projects/yd_trader
+cd ~/projects/high-concurrency
+conda activate ydtrader-high-concurrency
 sh -n build_tools/build_manylinux2014.sh \
   install/install_linux.sh \
   install/ydtrader-destroy
-.venv/bin/python -m pytest -q
+python -m pytest -q
 ```
 
 预期看到全部测试通过。任何一项失败都不要继续打包。
@@ -150,8 +145,8 @@ sh -n build_tools/build_manylinux2014.sh \
 ```bash
 mkdir -p ~/.ydtrader-issuer
 chmod 700 ~/.ydtrader-issuer
-cd ~/projects/yd_trader
-.venv/bin/python build_tools/generate_keypair.py \
+cd ~/projects/high-concurrency
+python build_tools/generate_keypair.py \
   --private-key ~/.ydtrader-issuer/issuer.private.pem \
   --public-key ~/.ydtrader-issuer/issuer.public.pem
 ```
@@ -161,8 +156,8 @@ cd ~/projects/yd_trader
 WSL 本机调试包可以这样构建：
 
 ```bash
-cd ~/projects/yd_trader
-.venv/bin/python build_tools/build_release.py \
+cd ~/projects/high-concurrency
+python build_tools/build_release.py \
   --private-key ~/.ydtrader-issuer/issuer.private.pem \
   --public-key ~/.ydtrader-issuer/issuer.public.pem
 ```
@@ -172,7 +167,7 @@ cd ~/projects/yd_trader
 正式交付必须在装有 Docker 的 Linux/WSL 主机运行：
 
 ```bash
-cd ~/projects/yd_trader
+cd ~/projects/high-concurrency
 build_tools/build_manylinux2014.sh \
   ~/.ydtrader-issuer/issuer.public.pem \
   ~/.ydtrader-issuer/issuer.private.pem
@@ -220,8 +215,8 @@ sudo install -o root -g "$(id -gn)" -m 0640 \
 把这串 64 位申请码发给发证人员。发证人员在安全构建机执行，`<机器申请码>` 必须替换：
 
 ```bash
-cd ~/projects/yd_trader
-.venv/bin/python build_tools/issue_license.py \
+cd ~/projects/high-concurrency
+python build_tools/issue_license.py \
   --private-key ~/.ydtrader-issuer/issuer.private.pem \
   --machine-code '<机器申请码>' \
   --features order monitor marketdata \

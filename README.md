@@ -8,19 +8,28 @@
 
 这能提高源码逆向与普通复制的成本，但不能抵抗能修改程序、系统时间或磁盘快照的 root 攻击者。监控命令同样每次要求人工输入密码，因此不支持无人值守自动重启。
 
-## 源码结构
+## 项目结构
 
 ```text
-scripts/ydtrader.py            唯一源码入口，发布时由 Nuitka 编译
-ydcore/trading.py              报单、查询、撤单与控制
-ydcore/monitoring.py           独立监控
-ydcore/marketdata.py           行情订阅与时间对比
-ydcore/licensing.py            签名、密码、机器与到期校验
-ydcore/launcher.py             统一命令分派
-build_tools/                   私有发证和 Linux 构建工具
-install/                       固定路径安装与到期销毁程序
-tests/                         离线安全与回归测试
+environment.yml               唯一开发与运行依赖清单
+data/                         输入和参考数据
+result/                       构建、运行与验收产物
+scripts/                      可重复执行的构建和运行入口
+tests/                        自动化测试
+utils/                        可复用的 WSL/Conda 运行时助手
+aeron_mvp/                    Java、SBE、Aeron 与行情桥接源码
+dashboard/                    高并发行情只读监控端
+ydcore/                       报单、监控、行情和授权业务源码
+config/                       配置模板与本机运行配置
+docs/                         架构和迁移文档
+build_tools/                  私有发证和 manylinux 构建模块
+install/                      固定路径安装与到期销毁程序
+vendor/wheels/                官方离线 pyyd wheel
 ```
+
+这是存量多语言项目，`aeron_mvp`、`dashboard` 和 `ydcore` 保留为成熟应用模块；
+`build_tools`、`install` 和官方离线 wheel 是交付边界，不为追求目录外观而搬迁。
+所有生成依赖、SDK、Archive、日志和验收证据只写入 `result/`，不提交 Git。
 
 旧 Windows 使用手册仅作为迁移参考保存在 `docs/legacy-windows-manual.md`，不属于当前交付方式。
 
@@ -28,19 +37,22 @@ Windows/Linux 独立使用同一授时中心、生成 JSON 报告、比较时差
 
 ## 构建环境
 
-正式发布要求 Linux x86_64、CPython 3.9 和 glibc 2.17 兼容构建环境。开发机可在 WSL 的 Linux 文件系统中创建环境：
+正式发布要求 Linux x86_64、CPython 3.9 和 glibc 2.17 兼容构建环境。开发和测试只在
+WSL2 Linux 文件系统中的项目专用 Miniconda 环境运行：
 
 ```bash
-cd ~/projects/yd_trader
-uv venv --python 3.9 .venv
-uv pip install --python .venv/bin/python -r requirements-build.txt
-uv pip install --python .venv/bin/python vendor/wheels/pyyd-1.486.96.99-cp39-cp39-linux_x86_64.whl
+cd ~/projects/high-concurrency
+conda env update -f environment.yml --prune
+conda activate ydtrader-high-concurrency
 ```
+
+`environment.yml` 是本机开发和运行依赖的唯一清单。`requirements-build.txt` 仅供
+manylinux2014 Docker 中的 CPython 3.9 正式构建使用，不用于创建本机虚拟环境。
 
 生成发证密钥。私钥应移出仓库并进入受控离线存储；不要提交任何私钥或已签发许可证：
 
 ```bash
-.venv/bin/python build_tools/generate_keypair.py \
+python build_tools/generate_keypair.py \
   --private-key /secure/issuer.private.pem \
   --public-key /secure/issuer.public.pem
 ```
@@ -48,8 +60,8 @@ uv pip install --python .venv/bin/python vendor/wheels/pyyd-1.486.96.99-cp39-cp3
 运行测试。直接调用 `build_release.py` 只生成当前 Linux 发行版的调试验收包：
 
 ```bash
-.venv/bin/python -m pytest -q
-.venv/bin/python build_tools/build_release.py \
+python -m pytest -q
+python build_tools/build_release.py \
   --private-key /secure/issuer.private.pem \
   --public-key /secure/issuer.public.pem
 ```
@@ -80,7 +92,7 @@ sudo install -o root -g "$(id -gn)" -m 0640 ydClient.ini /opt/ydtrader/config/yd
 ```bash
 /opt/ydtrader/ydtrader machine-code
 
-.venv/bin/python build_tools/issue_license.py \
+python build_tools/issue_license.py \
   --private-key /secure/issuer.private.pem \
   --machine-code '<申请码>' \
   --features order monitor marketdata \

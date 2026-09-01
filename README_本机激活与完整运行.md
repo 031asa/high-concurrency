@@ -1,8 +1,10 @@
 # YDTrader 本机激活与完整运行
 
-本文用于在当前 Windows＋WSL 开发机完整走通：Linux 构建、安装、签发许可证、激活、输入运行密码以及安全连接柜台。Windows 主项目仍是唯一源码目录，WSL 只保存 Linux 检查副本和 Linux 构建环境。
+本文用于在当前 Windows＋WSL 开发机完整走通：Linux 构建、安装、签发许可证、激活、
+输入运行密码以及安全连接柜台。唯一开发仓库位于 WSL2 Linux 文件系统中的
+`~/projects/high-concurrency`；Windows 只承担宿主工具和配置传递。
 
-> 本流程会在 WSL 内创建 `/opt/ydtrader`、`/var/lib/ydtrader` 和 root 级 systemd 到期 timer。24 小时到期后只会销毁 WSL 内的安装目录、运行配置、日志和授权状态，不会删除 Windows 主项目或 `~/projects/yd_trader` 源码检查副本。
+> 本流程会在 WSL 内创建 `/opt/ydtrader`、`/var/lib/ydtrader` 和 root 级 systemd 到期 timer。24 小时到期后只会销毁 WSL 内的安装目录、运行配置、日志和授权状态，不会删除 `~/projects/high-concurrency` 源码仓库。
 
 ## 一、为什么普通校验没有出现密码
 
@@ -21,8 +23,9 @@ wsl -d Ubuntu-24.04
 然后执行：
 
 ```bash
-cd ~/projects/yd_trader
-.venv/bin/python scripts/ydtrader.py order --wait-seconds 10
+cd ~/projects/high-concurrency
+conda activate ydtrader-high-concurrency
+python scripts/ydtrader.py order --wait-seconds 10
 ```
 
 此时会出现：
@@ -41,12 +44,14 @@ echo $?
 
 ## 二、开始前检查
 
-确认 WSL 检查副本已经同步 Windows 主项目：
+确认 WSL 主仓库已同步远端并激活项目 Conda 环境：
 
 ```bash
-cd ~/projects/yd_trader
+cd ~/projects/high-concurrency
 git pull --ff-only
 git status --short --branch
+conda env update -f environment.yml --prune
+conda activate ydtrader-high-concurrency
 ```
 
 确认输出没有 `M`、`D` 或 `??` 文件，再运行基础测试：
@@ -55,13 +60,13 @@ git status --short --branch
 sh -n build_tools/build_manylinux2014.sh \
   install/install_linux.sh \
   install/ydtrader-destroy
-.venv/bin/python -m pytest -q
+python -m pytest -q
 ```
 
 必须看到全部测试通过。测试数量会随功能增加而变化，不要按旧数量判断；当前交接版本的实测结果为：
 
 ```text
-19 passed, 7 skipped
+29 passed, 7 skipped
 ```
 
 关键标准是没有 `failed` 或 `error`；以后新增测试时，手册中的数量可能再次变化。
@@ -88,8 +93,8 @@ chmod 700 ~/.ydtrader-issuer
 仅在密钥文件不存在时执行一次：
 
 ```bash
-cd ~/projects/yd_trader
-.venv/bin/python build_tools/generate_keypair.py \
+cd ~/projects/high-concurrency
+python build_tools/generate_keypair.py \
   --private-key ~/.ydtrader-issuer/issuer.private.pem \
   --public-key ~/.ydtrader-issuer/issuer.public.pem
 ```
@@ -108,8 +113,8 @@ git status --short
 执行：
 
 ```bash
-cd ~/projects/yd_trader
-.venv/bin/python build_tools/build_release.py \
+cd ~/projects/high-concurrency
+python build_tools/build_release.py \
   --private-key ~/.ydtrader-issuer/issuer.private.pem \
   --public-key ~/.ydtrader-issuer/issuer.public.pem
 ```
@@ -134,13 +139,13 @@ build_tools/build_manylinux2014.sh \
 首次安装执行：
 
 ```bash
-cd ~/projects/yd_trader
+cd ~/projects/high-concurrency
 sudo result/ydtrader-linux-x86_64/install/install_linux.sh
 ```
 
 安装器固定安装到 `/opt/ydtrader`，不会覆盖已有安装。
 
-把 Windows 主项目中本机真实配置安装进去：
+把 Windows 中单独保管的本机真实配置安装进去：
 
 ```bash
 sudo install -o root -g "$(id -gn)" -m 0640 \
@@ -172,8 +177,8 @@ ls -l /opt/ydtrader/ydtrader \
 复制输出的64位字符，然后签发许可证，必须把 `<粘贴64位机器码>` 替换掉：
 
 ```bash
-cd ~/projects/yd_trader
-.venv/bin/python build_tools/issue_license.py \
+cd ~/projects/high-concurrency
+python build_tools/issue_license.py \
   --private-key ~/.ydtrader-issuer/issuer.private.pem \
   --machine-code '<粘贴64位机器码>' \
   --features order monitor marketdata \

@@ -3,8 +3,9 @@ set -euo pipefail
 
 SCRIPT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
 PROJECT_ROOT=$(cd -- "$SCRIPT_DIR/.." && pwd)
+source "$PROJECT_ROOT/utils/conda_runtime.sh"
 RUNTIME_DIR=${CTP_LIVE_RUNTIME_DIR:-"$PROJECT_ROOT/result/ctp-live-runtime"}
-VENV_DIR="$RUNTIME_DIR/venv"
+CONDA_ENV_DIR="$RUNTIME_DIR/conda"
 LOCALE_ROOT="$RUNTIME_DIR/locale"
 DOWNLOAD_DIR="$RUNTIME_DIR/downloads"
 SDK_DIR="$RUNTIME_DIR/official-ctp-6.7.11"
@@ -35,29 +36,15 @@ command -v tar >/dev/null || {
     exit 2
 }
 
-uv_bin=${UV_BIN:-}
-if [[ -z "$uv_bin" ]] && command -v uv >/dev/null; then
-    uv_bin=$(command -v uv)
-fi
-if [[ -z "$uv_bin" && -n "${HOME:-}" && -x "${HOME}/.local/bin/uv" ]]; then
-    uv_bin="${HOME}/.local/bin/uv"
-fi
-[[ -x "$uv_bin" ]] || {
-    printf 'uv is required; install it or set UV_BIN to its executable\n' >&2
-    exit 2
-}
-
 mkdir -p "$RUNTIME_DIR"
-if [[ ! -x "$VENV_DIR/bin/python" ]]; then
-    "$uv_bin" venv --python 3.9 "$VENV_DIR"
-fi
-"$uv_bin" pip install --python "$VENV_DIR/bin/python" -r "$PROJECT_ROOT/requirements-ctp.txt"
+ydtrader_prepare_conda_prefix "$PROJECT_ROOT" "$RUNTIME_DIR"
 
 mkdir -p "$DOWNLOAD_DIR" "$SDK_DIR"
 if [[ ! -f "$SDK_ARCHIVE" ]] || \
    [[ "$(sha256sum "$SDK_ARCHIVE" | awk '{print $1}')" != "$SDK_ARCHIVE_SHA256" ]]; then
     rm -f -- "$SDK_ARCHIVE"
-    curl -fL --retry 3 -o "$SDK_ARCHIVE" "$SDK_URL"
+    curl -fL --retry 3 --retry-all-errors --connect-timeout 15 \
+        -o "$SDK_ARCHIVE" "$SDK_URL"
 fi
 actual_archive_sha=$(sha256sum "$SDK_ARCHIVE" | awk '{print $1}')
 [[ "$actual_archive_sha" == "$SDK_ARCHIVE_SHA256" ]] || {
@@ -76,9 +63,9 @@ actual_library_sha=$(sha256sum "$official_library" | awk '{print $1}')
     exit 2
 }
 
-native_library=$(find "$VENV_DIR/lib" -path '*/site-packages/openctp_ctp.libs/libthostmduserapi_se-*.so' -type f -print -quit)
+native_library=$(find "$CONDA_ENV_DIR/lib" -path '*/site-packages/openctp_ctp.libs/libthostmduserapi_se-*.so' -type f -print -quit)
 [[ -n "$native_library" ]] || {
-    printf 'openctp-ctp market library was not found under %s\n' "$VENV_DIR" >&2
+    printf 'openctp-ctp market library was not found under %s\n' "$CONDA_ENV_DIR" >&2
     exit 2
 }
 install -m 0755 "$official_library" "$native_library"
@@ -93,7 +80,7 @@ if [[ ! -f "$LOCALE_ROOT/zh_CN.GB18030/LC_CTYPE" ]]; then
     localedef --no-archive -i zh_CN -f GB18030 "$LOCALE_ROOT/zh_CN.GB18030"
 fi
 
-api_version=$(LOCPATH="$LOCALE_ROOT" "$VENV_DIR/bin/python" -c \
+api_version=$(LOCPATH="$LOCALE_ROOT" "$CONDA_ENV_DIR/bin/python" -c \
     'from openctp_ctp import thostmduserapi as mdapi; print(mdapi.CThostFtdcMdApi.GetApiVersion())')
 [[ "$api_version" != *"openctp-tts"* ]] || {
     printf 'official CTP runtime unexpectedly contains the TTS library: %s\n' "$api_version" >&2
@@ -105,4 +92,4 @@ api_version=$(LOCPATH="$LOCALE_ROOT" "$VENV_DIR/bin/python" -c \
 }
 
 printf 'CTP_LIVE_BOOTSTRAP result=SUCCESS api_version=%s library_sha256=%s python=%s locale=%s\n' \
-    "$api_version" "$installed_sha" "$VENV_DIR/bin/python" "$LOCALE_ROOT"
+    "$api_version" "$installed_sha" "$CONDA_ENV_DIR/bin/python" "$LOCALE_ROOT"

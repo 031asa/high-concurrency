@@ -110,7 +110,11 @@ def main(argv=None):
     (app / "config").mkdir()
     shutil.copy2(PROJECT_ROOT / "config" / "account.example.json", app / "config")
     shutil.copy2(PROJECT_ROOT / "config" / "monitor.json", app / "config")
-    shutil.copy2(PROJECT_ROOT / "error_code.csv", app / "error_code.csv")
+    (app / "data").mkdir()
+    shutil.copy2(
+        PROJECT_ROOT / "data" / "error_code.csv",
+        app / "data" / "error_code.csv",
+    )
     shutil.copytree(PROJECT_ROOT / "install", release / "install")
     shutil.copy2(args.public_key, release / "install" / "ydtrader-public.pem")
     copy_release_support_files(release)

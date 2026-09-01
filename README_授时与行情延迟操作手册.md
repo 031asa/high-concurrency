@@ -26,7 +26,13 @@
 
 ## 二、当前 Windows＋WSL 开发机
 
-先把 Windows 主项目同步到 WSL 检查副本。以下命令中的项目路径按本机实际位置执行。
+先进入 WSL2 Linux 文件系统中的主项目仓库。以下命令中的项目路径按本机实际位置执行。
+
+```bash
+cd ~/projects/high-concurrency
+conda env update -f environment.yml --prune
+conda activate ydtrader-high-concurrency
+```
 
 ### 窗口和权限速查（必须先看）
 
@@ -73,7 +79,7 @@ wslinfo --networking-mode
 
 ### 24小时到期后的重新安装与激活
 
-许可证从首次激活开始默认只有效24小时。到期后 `/opt/ydtrader` 通常会被销毁；Windows主项目、`~/projects/yd_trader`源码检查副本、构建结果和发证私钥不会被销毁。旧许可证不能重新开始计时。
+许可证从首次激活开始默认只有效24小时。到期后 `/opt/ydtrader` 通常会被销毁；Windows主项目、`~/projects/high-concurrency`源码检查副本、构建结果和发证私钥不会被销毁。旧许可证不能重新开始计时。
 
 **【普通WSL终端｜不要sudo】先检查部署是否还存在：**
 
@@ -92,11 +98,11 @@ fi
 **【WSL终端｜命令内含sudo】重新安装程序：**
 
 ```bash
-cd ~/projects/yd_trader
+cd ~/projects/high-concurrency
 sudo result/ydtrader-linux-x86_64/install/install_linux.sh
 ```
 
-如果提示安装脚本不存在，先执行 `ls -l ~/projects/yd_trader/result`，不要从Windows目录直接运行Linux安装包。
+如果提示安装脚本不存在，先执行 `ls -l ~/projects/high-concurrency/result`，不要从Windows目录直接运行Linux安装包。
 
 **【WSL终端｜命令内含sudo】恢复本机真实柜台配置：**
 
@@ -117,11 +123,11 @@ ls -l /opt/ydtrader/ydtrader \
   /opt/ydtrader/config/account.json \
   /opt/ydtrader/config/ydClient.ini
 
-cd ~/projects/yd_trader
+cd ~/projects/high-concurrency
 MACHINE_CODE=$(/opt/ydtrader/ydtrader machine-code)
 LICENSE_FILE="$HOME/.ydtrader-issuer/local-$(date -u +%Y%m%dT%H%M%SZ).license.json"
 
-.venv/bin/python build_tools/issue_license.py \
+python build_tools/issue_license.py \
   --private-key ~/.ydtrader-issuer/issuer.private.pem \
   --machine-code "$MACHINE_CODE" \
   --features order monitor marketdata \
@@ -187,7 +193,7 @@ Windows报告直接读取 ntpd 已滤波和驯服后的系统状态：`offset` �
 **【WSL终端｜命令内含sudo】第一次配置Linux：**
 
 ```bash
-cd ~/projects/yd_trader
+cd ~/projects/high-concurrency
 sudo ./scripts/setup_linux_time_sync.sh --config ./config/time_authority.tencent-south-china-fallback.conf
 ```
 
@@ -210,7 +216,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\windows_time_sync.
 **【普通WSL终端｜不要sudo】紧接着生成Linux报告：**
 
 ```bash
-cd ~/projects/yd_trader
+cd ~/projects/high-concurrency
 ./scripts/linux_time_report.sh \
   --config ./config/time_authority.tencent-south-china-fallback.conf \
   --output ./linux-time.json

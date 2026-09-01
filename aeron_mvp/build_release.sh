@@ -3,7 +3,7 @@ set -euo pipefail
 
 SCRIPT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
 PROJECT_ROOT=$(cd -- "$SCRIPT_DIR/.." && pwd)
-VERSION=0.6.0
+VERSION=0.6.1
 PLATFORM=linux-x86_64
 DIST_NAME="ydtrader-aeron-mvp-java-${VERSION}-${PLATFORM}"
 RESULT_DIR="$PROJECT_ROOT/result"
@@ -47,6 +47,7 @@ mkdir -p \
     "$STAGE_DIST/dashboard" \
     "$STAGE_DIST/licenses" \
     "$STAGE_DIST/scripts" \
+    "$STAGE_DIST/utils" \
     "$STAGE_DIST/vendor/wheels"
 
 bash "$SCRIPT_DIR/build.sh"
@@ -64,8 +65,8 @@ cp -a "$PROJECT_ROOT/scripts/run_ydapi_aeron_mvp.sh" "$STAGE_DIST/scripts/run_yd
 cp -a "$PROJECT_ROOT/scripts/run_dashboard.sh" "$STAGE_DIST/scripts/run_dashboard.sh"
 cp -a "$PROJECT_ROOT/scripts/bootstrap_ctp_tts.sh" "$STAGE_DIST/scripts/bootstrap_ctp_tts.sh"
 cp -a "$PROJECT_ROOT/scripts/bootstrap_ctp_live.sh" "$STAGE_DIST/scripts/bootstrap_ctp_live.sh"
+cp -a "$PROJECT_ROOT/utils/conda_runtime.sh" "$STAGE_DIST/utils/conda_runtime.sh"
 cp -a "$PROJECT_ROOT/dashboard/." "$STAGE_DIST/dashboard/"
-cp -a "$PROJECT_ROOT/requirements-ctp.txt" "$STAGE_DIST/requirements-ctp.txt"
 cp -a "$PROJECT_ROOT/environment.yml" "$STAGE_DIST/environment.yml"
 cp -a "$PROJECT_ROOT/vendor/wheels/pyyd-1.486.96.99-cp39-cp39-linux_x86_64.whl" \
     "$STAGE_DIST/vendor/wheels/"
@@ -98,6 +99,7 @@ chmod 0755 \
     "$STAGE_DIST/scripts/run_dashboard.sh" \
     "$STAGE_DIST/scripts/bootstrap_ctp_tts.sh" \
     "$STAGE_DIST/scripts/bootstrap_ctp_live.sh" \
+    "$STAGE_DIST/utils/conda_runtime.sh" \
     "$STAGE_DIST/dashboard/server.py" \
     "$STAGE_DIST/aeron_mvp/runtime/bin/java"
 

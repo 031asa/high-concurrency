@@ -5,6 +5,7 @@ SCRIPT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
 PROJECT_ROOT=$(cd -- "$SCRIPT_DIR/.." && pwd)
 MVP_DIR="$PROJECT_ROOT/aeron_mvp"
 RUN_JAVA=(bash "$MVP_DIR/run_java.sh")
+source "$PROJECT_ROOT/utils/conda_runtime.sh"
 
 count=100000
 sync_level=0
@@ -16,15 +17,12 @@ ctp_latency_mode=historical_replay
 ctp_instruments=IF2609,IC2609,IH2609,IM2609,rb2610,au2610,ag2612,cu2610,m2609,i2609,SR609,TA609,si2609,lc2609
 ctp_repeat=10000
 ctp_runtime_root=${CTP_TTS_RUNTIME_DIR:-"$PROJECT_ROOT/result/ctp-tts-runtime"}
-ctp_python="$ctp_runtime_root/venv/bin/python"
+ctp_python="$ctp_runtime_root/conda/bin/python"
 ctp_udp_port=$((20000 + ($$ % 20000)))
 ctp_locale_root="$ctp_runtime_root/locale"
 ydapi_instrument=IF2609
 ydapi_repeat=10000
 ydapi_python=${YDAPI_PYTHON:-}
-if [[ -z "$ydapi_python" ]]; then
-    ydapi_python=$(command -v python || command -v python3 || true)
-fi
 ydapi_account_config="$PROJECT_ROOT/config/account.json"
 ydapi_api_config="$PROJECT_ROOT/config/ydClient.ini"
 ydapi_startup_timeout=60
@@ -157,6 +155,7 @@ esac
     exit 64
 }
 if [[ "$source" == ctp ]]; then
+    ctp_python=$(ydtrader_validate_conda_python "$PROJECT_ROOT" "$ctp_python")
     [[ -x "$ctp_python" ]] || {
         printf 'CTP Python is not executable: %s\n' "$ctp_python" >&2
         exit 2
@@ -196,6 +195,7 @@ if [[ "$source" == ctp ]]; then
     fi
 fi
 if [[ "$source" == ydapi ]]; then
+    ydapi_python=$(ydtrader_validate_conda_python "$PROJECT_ROOT" "$ydapi_python")
     [[ -x "$ydapi_python" ]] || {
         printf 'YDApi Python is not executable: %s\n' "$ydapi_python" >&2
         exit 2

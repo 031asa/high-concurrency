@@ -3,12 +3,13 @@ set -euo pipefail
 
 SCRIPT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
 PROJECT_ROOT=$(cd -- "$SCRIPT_DIR/.." && pwd)
+source "$PROJECT_ROOT/utils/conda_runtime.sh"
 TTS_VERSION=6.7.11
 TTS_ARCHIVE_SHA256=f9d4aec4aa3b3d1ec9f0587d37a447f6bfe4158745226279cc078257faa3a6ee
 TTS_MD_SHA256=c81a6fdb0c70110190fa6a64d138c0fcb13c33cca076a3dde9f479af6c45a887
 TTS_URL="http://www.openctp.cn/download/CTPAPI/TTS/tts_${TTS_VERSION}.zip"
 RUNTIME_DIR=${CTP_TTS_RUNTIME_DIR:-"$PROJECT_ROOT/result/ctp-tts-runtime"}
-VENV_DIR="$RUNTIME_DIR/venv"
+CONDA_ENV_DIR="$RUNTIME_DIR/conda"
 DOWNLOAD_DIR="$RUNTIME_DIR/downloads"
 SDK_DIR="$RUNTIME_DIR/sdk"
 ARCHIVE_FILE="$DOWNLOAD_DIR/tts_${TTS_VERSION}.zip"
@@ -26,18 +27,6 @@ for required in curl unzip sha256sum localedef; do
         exit 2
     }
 done
-
-uv_bin=${UV_BIN:-}
-if [[ -z "$uv_bin" ]] && command -v uv >/dev/null; then
-    uv_bin=$(command -v uv)
-fi
-if [[ -z "$uv_bin" && -n "${HOME:-}" && -x "${HOME}/.local/bin/uv" ]]; then
-    uv_bin="${HOME}/.local/bin/uv"
-fi
-[[ -x "$uv_bin" ]] || {
-    printf 'uv is required; install it or set UV_BIN to its executable\n' >&2
-    exit 2
-}
 
 mkdir -p "$DOWNLOAD_DIR" "$SDK_DIR"
 if [[ -n "${TTS_SDK_ZIP:-}" ]]; then
@@ -70,13 +59,10 @@ printf '%s  %s\n' "$TTS_MD_SHA256" "$SDK_MD_LIBRARY" | sha256sum --check --statu
     exit 2
 }
 
-if [[ ! -x "$VENV_DIR/bin/python" ]]; then
-    "$uv_bin" venv --python 3.9 "$VENV_DIR"
-fi
-"$uv_bin" pip install --python "$VENV_DIR/bin/python" -r "$PROJECT_ROOT/requirements-ctp.txt"
+ydtrader_prepare_conda_prefix "$PROJECT_ROOT" "$RUNTIME_DIR"
 
 mapfile -t native_libraries < <(
-    find "$VENV_DIR"/lib/python*/site-packages/openctp_ctp.libs \
+    find "$CONDA_ENV_DIR"/lib/python*/site-packages/openctp_ctp.libs \
         -maxdepth 1 -type f -name 'libthostmduserapi_se-*.so' -print
 )
 if [[ "${#native_libraries[@]}" -ne 1 ]]; then
@@ -101,7 +87,7 @@ if [[ ! -f "$LOCALE_ROOT/zh_CN.GB18030/LC_CTYPE" ]]; then
     localedef --no-archive -i zh_CN -f GB18030 "$LOCALE_ROOT/zh_CN.GB18030"
 fi
 
-LOCPATH="$LOCALE_ROOT" "$VENV_DIR/bin/python" -c \
+LOCPATH="$LOCALE_ROOT" "$CONDA_ENV_DIR/bin/python" -c \
     'from openctp_ctp import thostmduserapi as mdapi; print(mdapi.CThostFtdcMdApi.GetApiVersion())' \
     | grep -q 'openctp-tts v6\.7\.11' || {
         printf 'OpenCTP TTS Python import/version verification failed\n' >&2
@@ -109,4 +95,4 @@ LOCPATH="$LOCALE_ROOT" "$VENV_DIR/bin/python" -c \
     }
 
 printf 'CTP_TTS_BOOTSTRAP result=SUCCESS version=%s python=%s locale=%s\n' \
-    "$TTS_VERSION" "$VENV_DIR/bin/python" "$LOCALE_ROOT"
+    "$TTS_VERSION" "$CONDA_ENV_DIR/bin/python" "$LOCALE_ROOT"

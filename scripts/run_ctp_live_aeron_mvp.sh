@@ -6,7 +6,7 @@ PROJECT_ROOT=$(cd -- "$SCRIPT_DIR/.." && pwd)
 CTP_LIVE_RUNTIME_DIR=${CTP_LIVE_RUNTIME_DIR:-"$PROJECT_ROOT/result/ctp-live-runtime"}
 export CTP_LIVE_RUNTIME_DIR
 
-ctp_python="$CTP_LIVE_RUNTIME_DIR/venv/bin/python"
+ctp_python="$CTP_LIVE_RUNTIME_DIR/conda/bin/python"
 bash "$SCRIPT_DIR/bootstrap_ctp_live.sh"
 
 exec bash "$SCRIPT_DIR/run_aeron_mvp.sh" \
