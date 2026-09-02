@@ -1,4 +1,4 @@
-# YDTrader Aeron MVP Java 0.7.0
+# YDTrader Aeron MVP Java 0.7.1
 
 这是 Linux x86_64 自包含验收包，内含精简 Java 17 运行时、Aeron 1.51.0、已编译
 SBE codec 和行情 MVP。目标机不需要安装 Java，也不需要联网下载依赖。
@@ -6,8 +6,8 @@ SBE codec 和行情 MVP。目标机不需要安装 Java，也不需要联网下�
 ## 快速验收
 
 ```bash
-tar -xzf ydtrader-aeron-mvp-java-0.7.0-linux-x86_64.tar.gz
-cd ydtrader-aeron-mvp-java-0.7.0-linux-x86_64
+tar -xzf ydtrader-aeron-mvp-java-0.7.1-linux-x86_64.tar.gz
+cd ydtrader-aeron-mvp-java-0.7.1-linux-x86_64
 sha256sum -c manifest.sha256
 bash scripts/run_aeron_mvp.sh --count 100000 --sync-level 0
 ```
@@ -34,26 +34,18 @@ bash scripts/run_aeron_mvp.sh --count 100000 --sync-level 1
 
 运行结果和 recording 保存在包内 `result/aeron-mvp/<run-id>/`。
 
-## Leader ZMQ 接口
+## 通用 ZMQ/SBE 行情出口
 
-本版新增独立 Leader 消费支路：Aeron/Archive 保持原职责，Java/JeroMQ 通过 TCP `PUSH`
-发送 `snapshot` topic 与未改写的 SBE v3 bytes，Leader 侧适配器解码并直接写入原
-`SnapshotService.md_queue`。
-
-```bash
-bash scripts/run_leader_zmq_smoke.sh 1000
-```
-
-该命令同时验证实时订阅和 Archive replay，成功时输出 `live_replay_match=YES`。Leader 镜像
-静态钩子验证可运行：
+本版提供独立消费支路：Aeron/Archive 保持原职责，Java/JeroMQ 通过 TCP `PUSH`
+发送 `snapshot` topic 与未改写的 SBE v3 bytes。下游项目通过自己的 `PULL` 接口接收；
+本包不携带任何下游业务源码、队列实现或运行时钩子。
 
 ```bash
-bash scripts/validate_hpquant_compiled_hook.sh hpquant-market:1.0.0
+bash scripts/run_zmq_market_smoke.sh 1000
 ```
 
-实际容器运行须只读挂载 `aeron_mvp/leader_integration`，将它放在 `PYTHONPATH` 首位，并设置
-`HPQUANT_MARKET_SOURCE=aeron-zmq` 与 `HPQUANT_AERON_ZMQ_ENDPOINT`。未启用该环境变量时不改动
-Leader 原行情入口。
+该命令同时验证实时订阅和 Archive replay，成功时输出 `live_replay_match=YES`。
+正式出口使用 `bash aeron_mvp/run_java.sh zmq-egress ...`，默认端口为 TCP 7101。
 
 ## 实时 Dashboard（可选）
 
@@ -76,7 +68,7 @@ HdrHistogram 在线聚合，不在发布链路上执行，也不会逐笔写盘�
 ## 当前边界
 
 本版用于确认 Aeron IPC、Archive 持久化、双消费者、实时/离线一致性、重启恢复，以及
-Leader ZMQ 接入。
+通用 ZMQ/SBE 行情出口。
 默认 publisher 使用确定性模拟行情；可选 YDApi bridge 已能连接真实易达行情。本版不包含 C++ SPSC bridge、
 Dashboard 告警推送、systemd 服务或 `secure_release_toolkit`。
 

@@ -14,8 +14,8 @@ if ! aeron_mvp_resolve_runtime_dependencies; then
 fi
 
 main_class=com.ydtrader.mvp.AeronMvp
-if [[ "${1:-}" == leader-zmq ]]; then
-    main_class=com.ydtrader.mvp.LeaderZmqAdapter
+if [[ "${1:-}" == zmq-egress ]]; then
+    main_class=com.ydtrader.mvp.ZmqMarketDataEgress
     shift
 fi
 

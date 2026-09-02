@@ -1,36 +1,14 @@
 import importlib
-import queue
 import struct
 import sys
 from pathlib import Path
-from types import ModuleType
-
-import pytest
-import zmq
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
-INTEGRATION_DIR = PROJECT_ROOT / "aeron_mvp" / "leader_integration"
-
-
-stub_hpquant = ModuleType("hpquant")
-stub_message = ModuleType("hpquant.message")
-stub_bus = ModuleType("hpquant.message.zmq_bus")
-
-
-class _StubZmqSubscriber:
-    pass
-
-
-stub_bus.ZmqSubscriber = _StubZmqSubscriber
-stub_message.zmq_bus = stub_bus
-stub_hpquant.message = stub_message
-sys.modules.setdefault("hpquant", stub_hpquant)
-sys.modules.setdefault("hpquant.message", stub_message)
-sys.modules.setdefault("hpquant.message.zmq_bus", stub_bus)
-sys.path.insert(0, str(INTEGRATION_DIR))
-hpquant_aeron_source = importlib.import_module("hpquant_aeron_source")
-zmq_probe = importlib.import_module("zmq_probe")
+MVP_DIR = PROJECT_ROOT / "aeron_mvp"
+sys.path.insert(0, str(MVP_DIR))
+market_wire = importlib.import_module("market_wire")
+zmq_market_probe = importlib.import_module("zmq_market_probe")
 
 
 def _var_string(value):
@@ -39,7 +17,7 @@ def _var_string(value):
 
 
 def market_quote_frame(sequence=7):
-    block = bytearray(hpquant_aeron_source.V3_BLOCK_LENGTH)
+    block = bytearray(market_wire.V3_BLOCK_LENGTH)
     struct.pack_into("<Q", block, 0, sequence)
     struct.pack_into("<Q", block, 8, 1_000_000_000)
     struct.pack_into("<Q", block, 16, 1_012_000_000)
@@ -81,8 +59,8 @@ def market_quote_frame(sequence=7):
     header = struct.pack(
         "<HHHH",
         len(block),
-        hpquant_aeron_source.TEMPLATE_ID,
-        hpquant_aeron_source.SCHEMA_ID,
+        market_wire.TEMPLATE_ID,
+        market_wire.SCHEMA_ID,
         3,
     )
     strings = b"".join(
@@ -101,8 +79,8 @@ def market_quote_frame(sequence=7):
     return header + block + strings
 
 
-def test_decode_sbe_v3_to_ctp_shaped_tick():
-    tick = hpquant_aeron_source.decode_market_quote(market_quote_frame())
+def test_decode_sbe_v3_to_complete_tick():
+    tick = market_wire.decode_market_quote(market_quote_frame())
 
     assert tick["type"] == "snapshot"
     assert tick["Contract"] == "IC2609"
@@ -121,10 +99,10 @@ def test_decode_sbe_v3_to_ctp_shaped_tick():
 
 
 def test_probe_summary_keeps_complete_first_and_last_ticks():
-    first = hpquant_aeron_source.decode_market_quote(market_quote_frame(1))
-    last = hpquant_aeron_source.decode_market_quote(market_quote_frame(10))
+    first = market_wire.decode_market_quote(market_quote_frame(1))
+    last = market_wire.decode_market_quote(market_quote_frame(10))
 
-    summary = zmq_probe.build_summary(first, last, 10)
+    summary = zmq_market_probe.build_summary(first, last, 10)
 
     assert summary["count"] == 10
     assert summary["first_tick"] == first
@@ -135,24 +113,11 @@ def test_probe_summary_keeps_complete_first_and_last_ticks():
     assert summary["last_tick"]["AskVolume5"] == 51
 
 
-def test_subscriber_writes_directly_to_supplied_queue_and_detects_gap():
-    context = zmq.Context.instance()
-    publisher = context.socket(zmq.PUSH)
-    publisher.setsockopt(zmq.LINGER, 0)
-    port = publisher.bind_to_random_port("tcp://127.0.0.1")
-    output = queue.Queue()
-    subscriber = hpquant_aeron_source.AeronTickSubscriber(
-        f"tcp://127.0.0.1:{port}", output
-    )
-    try:
-        publisher.send_multipart([b"snapshot", market_quote_frame(1)])
-        received = subscriber.receive_once()
-        assert received["AeronSequence"] == 1
-        assert output.get_nowait()["Contract"] == "IC2609"
+def test_wire_tools_have_no_downstream_project_dependency():
+    decoder = (MVP_DIR / "market_wire.py").read_text(encoding="utf-8")
+    probe = (MVP_DIR / "zmq_market_probe.py").read_text(encoding="utf-8")
 
-        publisher.send_multipart([b"snapshot", market_quote_frame(3)])
-        with pytest.raises(hpquant_aeron_source.SequenceGapError):
-            subscriber.receive_once()
-    finally:
-        subscriber.close()
-        publisher.close(linger=0)
+    combined = decoder + probe
+    assert "hpquant" not in combined
+    assert "sitecustomize" not in combined
+    assert "leader_integration" not in combined

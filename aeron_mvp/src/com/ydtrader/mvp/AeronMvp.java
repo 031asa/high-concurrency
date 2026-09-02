@@ -222,7 +222,7 @@ public final class AeronMvp
         final double[] askPrices = new double[MAX_DEPTH_LEVELS];
         final long[] bidVolumes = new long[MAX_DEPTH_LEVELS];
         final long[] askVolumes = new long[MAX_DEPTH_LEVELS];
-        final LeaderFields leaderFields = LeaderFields.empty("synthetic");
+        final MarketFields marketFields = MarketFields.empty("synthetic");
 
         long backPressureCount = 0;
         long recordingId;
@@ -284,7 +284,7 @@ public final class AeronMvp
                         instrument,
                         "20260826",
                         Long.toString(marketTimestampNs),
-                        leaderFields);
+                        marketFields);
                     backPressureCount += offerUntilAccepted(publication, buffer, encodedLength);
                 }
 
@@ -331,7 +331,7 @@ public final class AeronMvp
         final double[] askPrices = new double[MAX_DEPTH_LEVELS];
         final long[] bidVolumes = new long[MAX_DEPTH_LEVELS];
         final long[] askVolumes = new long[MAX_DEPTH_LEVELS];
-        final LeaderFields leaderFields = LeaderFields.empty(adapterName);
+        final MarketFields marketFields = MarketFields.empty(adapterName);
 
         long backPressureCount = 0;
         long sourceTicks = 0;
@@ -451,35 +451,35 @@ public final class AeronMvp
                         throw new IllegalArgumentException(
                             "invalid " + adapterName + " packet version=" + version);
                     }
-                    leaderFields.clear(adapterName);
+                    marketFields.clear(adapterName);
                     if (version == ADAPTER_PACKET_VERSION_V3)
                     {
-                        leaderFields.volume = packet.getLong();
-                        leaderFields.turnover = packet.getDouble();
-                        leaderFields.openInterest = packet.getDouble();
-                        leaderFields.preSettlementPrice = packet.getDouble();
-                        leaderFields.preClosePrice = packet.getDouble();
-                        leaderFields.preOpenInterest = packet.getDouble();
-                        leaderFields.openPrice = packet.getDouble();
-                        leaderFields.highestPrice = packet.getDouble();
-                        leaderFields.lowestPrice = packet.getDouble();
-                        leaderFields.closePrice = packet.getDouble();
-                        leaderFields.settlementPrice = packet.getDouble();
-                        leaderFields.upperLimitPrice = packet.getDouble();
-                        leaderFields.lowerLimitPrice = packet.getDouble();
-                        leaderFields.preDelta = packet.getDouble();
-                        leaderFields.currDelta = packet.getDouble();
-                        leaderFields.averagePrice = packet.getDouble();
-                        leaderFields.updateMillisec = Short.toUnsignedInt(packet.getShort());
+                        marketFields.volume = packet.getLong();
+                        marketFields.turnover = packet.getDouble();
+                        marketFields.openInterest = packet.getDouble();
+                        marketFields.preSettlementPrice = packet.getDouble();
+                        marketFields.preClosePrice = packet.getDouble();
+                        marketFields.preOpenInterest = packet.getDouble();
+                        marketFields.openPrice = packet.getDouble();
+                        marketFields.highestPrice = packet.getDouble();
+                        marketFields.lowestPrice = packet.getDouble();
+                        marketFields.closePrice = packet.getDouble();
+                        marketFields.settlementPrice = packet.getDouble();
+                        marketFields.upperLimitPrice = packet.getDouble();
+                        marketFields.lowerLimitPrice = packet.getDouble();
+                        marketFields.preDelta = packet.getDouble();
+                        marketFields.currDelta = packet.getDouble();
+                        marketFields.averagePrice = packet.getDouble();
+                        marketFields.updateMillisec = Short.toUnsignedInt(packet.getShort());
                     }
                     final String instrument = readFixedUtf8(packet, 32);
                     final String tradingDay = readFixedUtf8(packet, 16);
                     final String marketTimestampRaw = readFixedUtf8(packet, 32);
                     if (version == ADAPTER_PACKET_VERSION_V3)
                     {
-                        leaderFields.exchangeId = readFixedUtf8(packet, 16);
-                        leaderFields.actionDay = readFixedUtf8(packet, 16);
-                        leaderFields.updateTime = readFixedUtf8(packet, 16);
+                        marketFields.exchangeId = readFixedUtf8(packet, 16);
+                        marketFields.actionDay = readFixedUtf8(packet, 16);
+                        marketFields.updateTime = readFixedUtf8(packet, 16);
                     }
 
                     if (magic != ADAPTER_PACKET_MAGIC)
@@ -528,7 +528,7 @@ public final class AeronMvp
                             instrument,
                             tradingDay,
                             marketTimestampRaw,
-                            leaderFields);
+                            marketFields);
                         backPressureCount += offerUntilAccepted(publication, buffer, encodedLength);
                         published++;
                     }
@@ -743,7 +743,7 @@ public final class AeronMvp
             "IC2609",
             "20260827",
             "20260827 14:00:00.123",
-            LeaderFields.selfTest());
+            MarketFields.selfTest());
         final MessageHeaderDecoder headerDecoder = new MessageHeaderDecoder();
         final MarketQuoteDecoder quoteDecoder = new MarketQuoteDecoder();
         quoteDecoder.wrapAndApplyHeader(buffer, 0, headerDecoder);
@@ -812,7 +812,7 @@ public final class AeronMvp
         final String instrument,
         final String tradingDay,
         final String marketTimestampRaw,
-        final LeaderFields leaderFields)
+        final MarketFields marketFields)
     {
         encoder.wrapAndApplyHeader(buffer, 0, headerEncoder)
             .sequence(sequence)
@@ -841,35 +841,35 @@ public final class AeronMvp
             .askPrice5(askPrices[4])
             .bidVolume5(bidVolumes[4])
             .askVolume5(askVolumes[4])
-            .volume(leaderFields.volume)
-            .turnover(leaderFields.turnover)
-            .openInterest(leaderFields.openInterest)
-            .preSettlementPrice(leaderFields.preSettlementPrice)
-            .preClosePrice(leaderFields.preClosePrice)
-            .preOpenInterest(leaderFields.preOpenInterest)
-            .openPrice(leaderFields.openPrice)
-            .highestPrice(leaderFields.highestPrice)
-            .lowestPrice(leaderFields.lowestPrice)
-            .closePrice(leaderFields.closePrice)
-            .settlementPrice(leaderFields.settlementPrice)
-            .upperLimitPrice(leaderFields.upperLimitPrice)
-            .lowerLimitPrice(leaderFields.lowerLimitPrice)
-            .preDelta(leaderFields.preDelta)
-            .currDelta(leaderFields.currDelta)
-            .averagePrice(leaderFields.averagePrice)
-            .updateMillisec(leaderFields.updateMillisec)
+            .volume(marketFields.volume)
+            .turnover(marketFields.turnover)
+            .openInterest(marketFields.openInterest)
+            .preSettlementPrice(marketFields.preSettlementPrice)
+            .preClosePrice(marketFields.preClosePrice)
+            .preOpenInterest(marketFields.preOpenInterest)
+            .openPrice(marketFields.openPrice)
+            .highestPrice(marketFields.highestPrice)
+            .lowestPrice(marketFields.lowestPrice)
+            .closePrice(marketFields.closePrice)
+            .settlementPrice(marketFields.settlementPrice)
+            .upperLimitPrice(marketFields.upperLimitPrice)
+            .lowerLimitPrice(marketFields.lowerLimitPrice)
+            .preDelta(marketFields.preDelta)
+            .currDelta(marketFields.currDelta)
+            .averagePrice(marketFields.averagePrice)
+            .updateMillisec(marketFields.updateMillisec)
             .sessionId(sessionId)
             .instrument(instrument)
             .tradingDay(tradingDay)
             .marketTimestampRaw(marketTimestampRaw)
-            .exchangeId(leaderFields.exchangeId)
-            .actionDay(leaderFields.actionDay)
-            .updateTime(leaderFields.updateTime)
-            .source(leaderFields.source);
+            .exchangeId(marketFields.exchangeId)
+            .actionDay(marketFields.actionDay)
+            .updateTime(marketFields.updateTime)
+            .source(marketFields.source);
         return MessageHeaderEncoder.ENCODED_LENGTH + encoder.encodedLength();
     }
 
-    private static final class LeaderFields
+    private static final class MarketFields
     {
         private long volume;
         private double turnover;
@@ -893,16 +893,16 @@ public final class AeronMvp
         private String updateTime = "";
         private String source = "";
 
-        private static LeaderFields empty(final String source)
+        private static MarketFields empty(final String source)
         {
-            final LeaderFields fields = new LeaderFields();
+            final MarketFields fields = new MarketFields();
             fields.source = source;
             return fields;
         }
 
-        private static LeaderFields selfTest()
+        private static MarketFields selfTest()
         {
-            final LeaderFields fields = empty("synthetic");
+            final MarketFields fields = empty("synthetic");
             fields.volume = 1234;
             fields.turnover = 5_000_100.25;
             fields.openInterest = 98_765.5;

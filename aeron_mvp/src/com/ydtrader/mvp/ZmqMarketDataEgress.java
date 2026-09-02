@@ -23,11 +23,10 @@ import java.util.Locale;
 import java.util.Map;
 
 /**
- * Bridges the canonical Aeron SBE frame to the Leader process over a native ZMTP endpoint.
- * The Leader side decodes the unchanged SBE bytes and writes the resulting CTP-shaped dict
- * into SnapshotService.md_queue.
+ * Bridges canonical Aeron SBE frames to an independent downstream process over ZMTP/TCP.
+ * The frame bytes are forwarded unchanged; the consumer owns its decoder and queue adapter.
  */
-public final class LeaderZmqAdapter
+public final class ZmqMarketDataEgress
 {
     private static final String RAW_CHANNEL = "aeron:ipc?alias=ydtrader-raw";
     private static final int RAW_STREAM_ID = 1001;
@@ -37,7 +36,7 @@ public final class LeaderZmqAdapter
     private static final String ARCHIVE_CONTROL_CHANNEL = "aeron:udp?endpoint=localhost:8010";
     private static final String ARCHIVE_RESPONSE_CHANNEL = "aeron:udp?endpoint=localhost:0";
 
-    private LeaderZmqAdapter()
+    private ZmqMarketDataEgress()
     {
     }
 
@@ -56,7 +55,7 @@ public final class LeaderZmqAdapter
         {
             System.err.printf(
                 Locale.ROOT,
-                "LEADER_ZMQ_ADAPTER result=FAILED type=%s message=%s%n",
+                "ZMQ_MARKET_EGRESS result=FAILED type=%s message=%s%n",
                 ex.getClass().getSimpleName(),
                 ex.getMessage());
             ex.printStackTrace(System.err);
@@ -75,7 +74,7 @@ public final class LeaderZmqAdapter
         final String endpoint = options.value("endpoint", "tcp://127.0.0.1:7101");
         if (!endpoint.startsWith("tcp://"))
         {
-            throw new IllegalArgumentException("Leader endpoint must use tcp://: " + endpoint);
+            throw new IllegalArgumentException("ZMQ endpoint must use tcp://: " + endpoint);
         }
         final long expectedCount = options.longValue("expected-count", 0, 0, Long.MAX_VALUE);
         final long timeoutSeconds = options.longValue("timeout-seconds", 60, 1, 86_400);
@@ -94,13 +93,13 @@ public final class LeaderZmqAdapter
             socket.setImmediate(true);
             if (!socket.bind(endpoint))
             {
-                throw new IllegalStateException("cannot bind Leader ZMQ endpoint: " + endpoint);
+                throw new IllegalStateException("cannot bind market-data ZMQ endpoint: " + endpoint);
             }
 
             final Forwarder forwarder = new Forwarder(socket, checkpointFile, checkpointInterval);
             System.out.printf(
                 Locale.ROOT,
-                "LEADER_ZMQ_ADAPTER state=STARTING mode=%s endpoint=%s expected=%d%n",
+                "ZMQ_MARKET_EGRESS state=STARTING mode=%s endpoint=%s expected=%d%n",
                 mode,
                 endpoint,
                 expectedCount);
@@ -116,7 +115,7 @@ public final class LeaderZmqAdapter
             forwarder.writeCheckpoint();
             System.out.printf(
                 Locale.ROOT,
-                "LEADER_ZMQ_ADAPTER result=SUCCESS mode=%s sent=%d last_sequence=%d " +
+                "ZMQ_MARKET_EGRESS result=SUCCESS mode=%s sent=%d last_sequence=%d " +
                     "last_position=%d%n",
                 mode,
                 forwarder.sent,
@@ -195,6 +194,7 @@ public final class LeaderZmqAdapter
         {
             final long before = forwarder.sent;
             final int fragments = subscription.poll(forwarder::onFragment, FRAGMENT_LIMIT);
+            forwarder.throwIfFailed();
             if (forwarder.sent != before)
             {
                 lastProgressNs = System.nanoTime();
@@ -245,7 +245,7 @@ public final class LeaderZmqAdapter
     private static void usage()
     {
         System.out.println(
-            "leader-zmq --mode live|replay --aeron-dir DIR [--recording-id ID] " +
+            "zmq-egress --mode live|replay --aeron-dir DIR [--recording-id ID] " +
                 "[--endpoint tcp://127.0.0.1:7101] [--expected-count N] " +
                 "[--checkpoint-file FILE] [--resume]");
     }
@@ -263,6 +263,7 @@ public final class LeaderZmqAdapter
         private long lastSequence;
         private long lastPosition;
         private long recordingId = -1;
+        private RuntimeException failure;
 
         private Forwarder(
             final ZMQ.Socket socket,
@@ -275,6 +276,26 @@ public final class LeaderZmqAdapter
         }
 
         private void onFragment(
+            final DirectBuffer buffer,
+            final int offset,
+            final int length,
+            final Header header)
+        {
+            if (failure != null)
+            {
+                return;
+            }
+            try
+            {
+                forwardFragment(buffer, offset, length, header);
+            }
+            catch (final RuntimeException ex)
+            {
+                failure = ex;
+            }
+        }
+
+        private void forwardFragment(
             final DirectBuffer buffer,
             final int offset,
             final int length,
@@ -308,7 +329,7 @@ public final class LeaderZmqAdapter
             if (!socket.send(SNAPSHOT_TOPIC, ZMQ.SNDMORE) || !socket.send(payload, 0))
             {
                 throw new IllegalStateException(
-                    "Leader ZMQ send timed out at sequence " + sequence);
+                    "market-data ZMQ send timed out at sequence " + sequence);
             }
             expectedSequence = sequence + 1;
             lastSequence = sequence;
@@ -324,6 +345,14 @@ public final class LeaderZmqAdapter
                 {
                     throw new IllegalStateException("cannot write checkpoint", ex);
                 }
+            }
+        }
+
+        private void throwIfFailed()
+        {
+            if (failure != null)
+            {
+                throw failure;
             }
         }
 

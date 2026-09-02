@@ -20,6 +20,7 @@ if ! aeron_mvp_resolve_build_dependencies; then
 fi
 
 mkdir -p "$GENERATED_DIR" "$CLASSES_DIR"
+find "$CLASSES_DIR" -mindepth 1 -delete
 
 "$JAVA_HOME/bin/java" \
     --add-opens java.base/jdk.internal.misc=ALL-UNNAMED \
