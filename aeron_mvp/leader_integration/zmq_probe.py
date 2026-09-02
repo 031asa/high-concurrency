@@ -35,6 +35,22 @@ class CountingQueue:
         self.count += 1
 
 
+def build_summary(first, last, count: int) -> dict:
+    """Keep both complete boundary ticks plus compact comparison metadata."""
+
+    return {
+        "count": count,
+        "first_sequence": first["AeronSequence"],
+        "last_sequence": last["AeronSequence"],
+        "session_id": last["AeronSessionID"],
+        "contract": last["Contract"],
+        "schema_version": last["SchemaVersion"],
+        "source": last["MarketSource"],
+        "first_tick": first,
+        "last_tick": last,
+    }
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--endpoint", required=True)
@@ -61,18 +77,17 @@ def main() -> int:
         raise RuntimeError(
             f"unexpected sequence range {first['AeronSequence']}..{last['AeronSequence']}"
         )
-    summary = {
-        "count": sink.count,
-        "first_sequence": first["AeronSequence"],
-        "last_sequence": last["AeronSequence"],
-        "session_id": last["AeronSessionID"],
-        "contract": last["Contract"],
-        "schema_version": last["SchemaVersion"],
-        "source": last["MarketSource"],
-    }
+    summary = build_summary(first, last, sink.count)
     args.summary_file.parent.mkdir(parents=True, exist_ok=True)
     args.summary_file.write_text(
-        json.dumps(summary, ensure_ascii=False, sort_keys=True) + "\n",
+        json.dumps(
+            summary,
+            ensure_ascii=False,
+            indent=2,
+            sort_keys=True,
+            allow_nan=False,
+        )
+        + "\n",
         encoding="utf-8",
     )
     print(

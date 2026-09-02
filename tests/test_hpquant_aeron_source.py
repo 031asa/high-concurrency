@@ -30,6 +30,7 @@ sys.modules.setdefault("hpquant.message", stub_message)
 sys.modules.setdefault("hpquant.message.zmq_bus", stub_bus)
 sys.path.insert(0, str(INTEGRATION_DIR))
 hpquant_aeron_source = importlib.import_module("hpquant_aeron_source")
+zmq_probe = importlib.import_module("zmq_probe")
 
 
 def _var_string(value):
@@ -117,6 +118,21 @@ def test_decode_sbe_v3_to_ctp_shaped_tick():
     assert tick["UpdateMillisec"] == 123
     assert tick["BidPrice5"] == 4_999.0
     assert tick["AskVolume5"] == 51
+
+
+def test_probe_summary_keeps_complete_first_and_last_ticks():
+    first = hpquant_aeron_source.decode_market_quote(market_quote_frame(1))
+    last = hpquant_aeron_source.decode_market_quote(market_quote_frame(10))
+
+    summary = zmq_probe.build_summary(first, last, 10)
+
+    assert summary["count"] == 10
+    assert summary["first_tick"] == first
+    assert summary["last_tick"] == last
+    assert summary["last_tick"]["LastPrice"] == 5_000.1
+    assert summary["last_tick"]["Volume"] == 1234
+    assert summary["last_tick"]["BidPrice5"] == 4_999.0
+    assert summary["last_tick"]["AskVolume5"] == 51
 
 
 def test_subscriber_writes_directly_to_supplied_queue_and_detects_gap():
