@@ -6,6 +6,7 @@ from __future__ import annotations
 import argparse
 import json
 import time
+from datetime import datetime, timezone
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -15,9 +16,13 @@ from urllib.parse import urlparse
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_RESULT_ROOT = PROJECT_ROOT / "result" / "aeron-mvp"
+DEFAULT_TIME_REPORT_ROOT = PROJECT_ROOT
 INDEX_FILE = Path(__file__).resolve().with_name("index.html")
 MAX_SERIES_POINTS = 720
 MAX_PROGRESS_BYTES = 2 * 1024 * 1024
+MAX_TIME_REPORT_BYTES = 256 * 1024
+DEFAULT_TIME_REPORT_MAX_AGE_SECONDS = 300
+MAX_REPORT_SAMPLE_SEPARATION_SECONDS = 60
 
 
 def _parse_key_values(path: Path) -> Dict[str, str]:
@@ -73,6 +78,212 @@ def _read_progress(path: Path) -> List[Dict[str, Any]]:
 
 def _summary(path: Path) -> Dict[str, Any]:
     return {key: _coerce(value) for key, value in _parse_key_values(path).items()}
+
+
+def _read_json_object(path: Path) -> tuple[Optional[Dict[str, Any]], str]:
+    try:
+        if path.stat().st_size > MAX_TIME_REPORT_BYTES:
+            return None, "报告文件过大"
+        value = json.loads(path.read_text(encoding="utf-8"))
+    except FileNotFoundError:
+        return None, ""
+    except (OSError, UnicodeError, json.JSONDecodeError) as error:
+        return None, f"无法读取报告：{error}"
+    if not isinstance(value, dict):
+        return None, "报告根节点必须是对象"
+    return value, ""
+
+
+def _timestamp_ms(value: object) -> Optional[int]:
+    try:
+        text = str(value)
+        if text.endswith("Z"):
+            text = text[:-1] + "+00:00"
+        parsed = datetime.fromisoformat(text)
+        if parsed.tzinfo is None:
+            parsed = parsed.replace(tzinfo=timezone.utc)
+        return int(parsed.timestamp() * 1000)
+    except (TypeError, ValueError, OverflowError):
+        return None
+
+
+def _number(value: object) -> Optional[float]:
+    try:
+        return float(value)
+    except (TypeError, ValueError, OverflowError):
+        return None
+
+
+def _time_report(
+    report_root: Path,
+    platform: str,
+    now_ms: int,
+    max_age_seconds: int,
+) -> Dict[str, Any]:
+    path = report_root / f"{platform}-time.json"
+    raw, read_error = _read_json_object(path)
+    if raw is None:
+        return {
+            "platform": platform,
+            "available": bool(read_error),
+            "status": "INVALID" if read_error else "MISSING",
+            "path": str(path),
+            "failure": read_error,
+        }
+
+    failures: List[str] = []
+    if raw.get("schema") != 1:
+        failures.append("不支持的报告schema")
+    if raw.get("platform") != platform:
+        failures.append("报告平台不匹配")
+    generated_ms = _timestamp_ms(raw.get("generated_at_utc"))
+    if generated_ms is None:
+        failures.append("报告时间无效")
+        age_seconds = None
+        fresh = False
+    else:
+        age_seconds = (now_ms - generated_ms) / 1000.0
+        fresh = abs(age_seconds) <= max_age_seconds
+        if not fresh:
+            failures.append(f"报告超过{max_age_seconds}秒有效期")
+
+    report_pass = raw.get("pass") is True
+    if not report_pass:
+        failures.append(str(raw.get("failure") or "报告自身未通过"))
+    authority = raw.get("authority") if isinstance(raw.get("authority"), dict) else {}
+    offset_ms = _number(raw.get("authority_minus_local_ms"))
+    if offset_ms is None:
+        failures.append("报告缺少有效offset")
+    uncertainty_ms = _number(raw.get("uncertainty_ms"))
+    stale_failure = f"报告超过{max_age_seconds}秒有效期"
+    status = "PASS" if not failures else ("STALE" if failures == [stale_failure] else "FAIL")
+    return {
+        "platform": platform,
+        "available": True,
+        "status": status,
+        "path": str(path),
+        "hostname": raw.get("hostname", ""),
+        "generated_at_utc": raw.get("generated_at_utc", ""),
+        "generated_at_ms": generated_ms,
+        "age_seconds": age_seconds,
+        "fresh": fresh,
+        "authority": {
+            "name": authority.get("name", ""),
+            "url": authority.get("url", ""),
+            "ntp_servers": authority.get("ntp_servers", []),
+            "environment": authority.get("environment", ""),
+        },
+        "selected_source": raw.get("selected_source", ""),
+        "sync_mode": raw.get("sync_mode", "network_ntp"),
+        "independent_authority_sync": raw.get("independent_authority_sync", platform == "windows"),
+        "offset_ms": offset_ms,
+        "uncertainty_ms": uncertainty_ms,
+        "max_offset_ms": _number(raw.get("max_offset_ms")),
+        "max_cross_difference_ms": _number(raw.get("max_cross_difference_ms")),
+        "report_pass": report_pass,
+        "failure": "; ".join(item for item in failures if item),
+    }
+
+
+def _authority_identity(report: Dict[str, Any]) -> tuple[object, ...]:
+    authority = report.get("authority") or {}
+    servers = authority.get("ntp_servers") or []
+    return (
+        authority.get("name"),
+        authority.get("url"),
+        tuple(sorted(str(item) for item in servers)),
+        authority.get("environment"),
+    )
+
+
+def _compare_time_reports(windows: Dict[str, Any], linux: Dict[str, Any]) -> Dict[str, Any]:
+    if windows.get("status") in {"MISSING", "INVALID"} or linux.get("status") in {"MISSING", "INVALID"}:
+        return {"available": False, "status": "UNAVAILABLE", "failures": ["缺少有效的双端报告"]}
+
+    failures: List[str] = []
+    authority_match = _authority_identity(windows) == _authority_identity(linux)
+    if not authority_match:
+        failures.append("Windows与Linux授时源配置不一致")
+    windows_generated = windows.get("generated_at_ms")
+    linux_generated = linux.get("generated_at_ms")
+    sample_gap_seconds = None
+    if windows_generated is not None and linux_generated is not None:
+        sample_gap_seconds = abs(windows_generated - linux_generated) / 1000.0
+        if sample_gap_seconds > MAX_REPORT_SAMPLE_SEPARATION_SECONDS:
+            failures.append("双端报告采样时间相差超过60秒")
+    else:
+        failures.append("双端报告时间无效")
+
+    windows_offset = windows.get("offset_ms")
+    linux_offset = linux.get("offset_ms")
+    cross_difference_ms = None
+    if windows_offset is not None and linux_offset is not None:
+        cross_difference_ms = abs(float(windows_offset) - float(linux_offset))
+    limits = [
+        value for value in (windows.get("max_cross_difference_ms"), linux.get("max_cross_difference_ms"))
+        if value is not None
+    ]
+    limit_ms = min(limits) if limits else None
+    if cross_difference_ms is None or limit_ms is None:
+        failures.append("缺少双端偏差或门槛")
+    elif cross_difference_ms > limit_ms:
+        failures.append(f"双端差值超过{limit_ms:g}ms")
+    if windows.get("status") != "PASS":
+        failures.append("Windows检测未通过")
+    if linux.get("status") != "PASS":
+        failures.append("Linux检测未通过")
+    return {
+        "available": True,
+        "status": "PASS" if not failures else "FAIL",
+        "authority_match": authority_match,
+        "sample_gap_seconds": sample_gap_seconds,
+        "cross_difference_ms": cross_difference_ms,
+        "limit_ms": limit_ms,
+        "failures": failures,
+    }
+
+
+def collect_time_sync_status(
+    report_root: Path,
+    now_ms: Optional[int] = None,
+    max_age_seconds: int = DEFAULT_TIME_REPORT_MAX_AGE_SECONDS,
+) -> Dict[str, Any]:
+    generated_ms = int(time.time() * 1000) if now_ms is None else now_ms
+    windows = _time_report(report_root, "windows", generated_ms, max_age_seconds)
+    linux = _time_report(report_root, "linux", generated_ms, max_age_seconds)
+    comparison = _compare_time_reports(windows, linux)
+    if comparison.get("available"):
+        detection_status = comparison["status"]
+    elif windows.get("available") or linux.get("available"):
+        detection_status = "FAIL" if "INVALID" in {windows.get("status"), linux.get("status")} else "PARTIAL"
+    else:
+        detection_status = "UNAVAILABLE"
+    return {
+        "generated_at_ms": generated_ms,
+        "operation": {
+            "execution": "external_privileged",
+            "dashboard_adjusts_clock": False,
+            "message": "对时操作由受控脚本执行；Dashboard只展示操作入口，不直接修改系统时间。",
+            "windows": {
+                "title": "Windows宿主对时",
+                "requires_admin": True,
+                "command": "powershell -NoProfile -ExecutionPolicy Bypass -File .\\scripts\\windows_time_sync.ps1 -Config .\\config\\time_authority.cffex.conf -Apply -Output .\\windows-time.json -NtpRoot D:\\NTP",
+            },
+            "linux": {
+                "title": "Leader原生Linux对时",
+                "requires_admin": True,
+                "command": "sudo ./scripts/setup_linux_time_sync.sh --config ./config/time_authority.cffex.conf",
+            },
+        },
+        "detection": {
+            "status": detection_status,
+            "max_report_age_seconds": max_age_seconds,
+            "windows": windows,
+            "linux": linux,
+            "comparison": comparison,
+            "message": "授时检测只使用NTP/PTP报告；交易所行情不参与对时判定。",
+        },
+    }
 
 
 def _latest_run(result_root: Path) -> Optional[Path]:
@@ -142,18 +353,34 @@ def collect_status(result_root: Path) -> Dict[str, Any]:
         }
         for row in compute_rows
     ]
+    for point in series:
+        point["observed_delta_ms"] = point.get("mean_ms")
+    latency_mode = run["latency_mode"]
+    historical = latency_mode == "historical_replay"
+    market_observation = {
+        "status": "HISTORICAL" if historical else ("SYNTHETIC" if run["source"] == "synthetic" else "LIVE"),
+        "valid_for_live_observation": not historical,
+        "metric": "absolute_timestamp_delta",
+        "definition": "|本地回调接收时间 - 行情事件时间|；不等于授时偏差，不参与对时。",
+        "mean_abs_ms": None if historical else compute.get("mean_ms"),
+        "p95_abs_ms": None if historical else compute.get("p95_ms"),
+        "max_abs_ms": None if historical else compute.get("max_ms"),
+    }
     return {
         "dashboard_status": run_status,
         "generated_at_ms": now_ms,
         "run": run,
         "compute": compute,
         "audit": audit,
+        "market_observation": market_observation,
         "series": series,
     }
 
 
 class DashboardHandler(BaseHTTPRequestHandler):
     result_root = DEFAULT_RESULT_ROOT
+    time_report_root = DEFAULT_TIME_REPORT_ROOT
+    time_report_max_age_seconds = DEFAULT_TIME_REPORT_MAX_AGE_SECONDS
     index_file = INDEX_FILE
 
     def do_GET(self) -> None:  # noqa: N802 - stdlib API name
@@ -163,6 +390,12 @@ class DashboardHandler(BaseHTTPRequestHandler):
             return
         if path == "/api/status":
             self._send_json(HTTPStatus.OK, collect_status(self.result_root))
+            return
+        if path == "/api/time-sync":
+            self._send_json(
+                HTTPStatus.OK,
+                collect_time_sync_status(self.time_report_root, max_age_seconds=self.time_report_max_age_seconds),
+            )
             return
         if path == "/healthz":
             self._send_json(HTTPStatus.OK, {"status": "ok"})
@@ -191,12 +424,20 @@ def parse_args(argv: Optional[Iterable[str]] = None) -> argparse.Namespace:
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--port", type=int, default=8080)
     parser.add_argument("--result-root", type=Path, default=DEFAULT_RESULT_ROOT)
+    parser.add_argument("--time-report-root", type=Path, default=DEFAULT_TIME_REPORT_ROOT)
+    parser.add_argument(
+        "--time-report-max-age-seconds",
+        type=int,
+        default=DEFAULT_TIME_REPORT_MAX_AGE_SECONDS,
+    )
     return parser.parse_args(argv)
 
 
 def main(argv: Optional[Iterable[str]] = None) -> int:
     args = parse_args(argv)
     DashboardHandler.result_root = args.result_root.resolve()
+    DashboardHandler.time_report_root = args.time_report_root.resolve()
+    DashboardHandler.time_report_max_age_seconds = max(1, args.time_report_max_age_seconds)
     server = ThreadingHTTPServer((args.host, args.port), DashboardHandler)
     print(
         f"YDTRADER_DASHBOARD url=http://{args.host}:{args.port} "

@@ -1,13 +1,9 @@
-"""Aeron/SBE v3 source adapter for the compiled hpquant SnapshotService."""
+"""Independent decoder for the versioned YD Market Wire contract."""
 
 from __future__ import annotations
 
-import os
 import struct
 from typing import Any
-
-import zmq
-from hpquant.message.zmq_bus import ZmqSubscriber
 
 
 TOPIC = b"snapshot"
@@ -36,10 +32,6 @@ V3_DOUBLE_FIELDS = (
 
 
 class SbeDecodeError(ValueError):
-    pass
-
-
-class SequenceGapError(RuntimeError):
     pass
 
 
@@ -89,7 +81,7 @@ def decode_market_quote(payload: bytes) -> dict[str, Any]:
         bid_volumes.append(_unpack("<q", payload, level_offset + 16))
         ask_volumes.append(_unpack("<q", payload, level_offset + 24))
 
-    leader_fields: dict[str, Any] = {
+    quote_fields: dict[str, Any] = {
         "Volume": 0,
         **{name: 0.0 for name in V3_DOUBLE_FIELDS},
         "UpdateMillisec": 0,
@@ -97,10 +89,10 @@ def decode_market_quote(payload: bytes) -> dict[str, Any]:
     if version >= 3:
         if block_length < V3_BLOCK_LENGTH:
             raise SbeDecodeError(f"invalid v3 block length: {block_length}")
-        leader_fields["Volume"] = _unpack("<q", payload, fixed + 194)
+        quote_fields["Volume"] = _unpack("<q", payload, fixed + 194)
         for index, name in enumerate(V3_DOUBLE_FIELDS):
-            leader_fields[name] = _unpack("<d", payload, fixed + 202 + index * 8)
-        leader_fields["UpdateMillisec"] = _unpack("<H", payload, fixed + 322)
+            quote_fields[name] = _unpack("<d", payload, fixed + 202 + index * 8)
+        quote_fields["UpdateMillisec"] = _unpack("<H", payload, fixed + 322)
 
     var_offset = fixed + block_length
     session_id, var_offset = _decode_var_string(payload, var_offset)
@@ -136,7 +128,7 @@ def decode_market_quote(payload: bytes) -> dict[str, Any]:
         "MarketSource": source,
         "MarketTimestampNs": market_timestamp_ns,
         "LocalReceiveNs": local_receive_ns,
-        **leader_fields,
+        **quote_fields,
     }
     for level in range(1, 6):
         index = level - 1
@@ -145,63 +137,3 @@ def decode_market_quote(payload: bytes) -> dict[str, Any]:
         tick[f"BidVolume{level}"] = bid_volumes[index]
         tick[f"AskVolume{level}"] = ask_volumes[index]
     return tick
-
-
-class AeronTickSubscriber(ZmqSubscriber):
-    """Binary PULL endpoint compatible with the project's hpquant ZMQ bus family."""
-
-    def __init__(self, endpoint: str, output_queue, receive_hwm: int = 100_000):
-        if not endpoint.startswith("tcp://"):
-            raise ValueError(f"Aeron Leader endpoint must use tcp://: {endpoint}")
-        self.ctx = zmq.Context.instance()
-        self.sock = self.ctx.socket(zmq.PULL)
-        self.sock.setsockopt(zmq.LINGER, 0)
-        self.sock.setsockopt(zmq.RCVHWM, receive_hwm)
-        self.sock.connect(endpoint)
-        self.queue = output_queue
-        self.last: dict[str, dict[str, Any]] = {}
-        self.expected_by_session: dict[str, int] = {}
-
-    def receive_once(self) -> dict[str, Any] | None:
-        frames = self.sock.recv_multipart()
-        if len(frames) != 2:
-            raise SbeDecodeError(f"expected 2 ZMQ frames, received {len(frames)}")
-        topic, payload = frames
-        if topic != TOPIC:
-            return None
-        tick = decode_market_quote(payload)
-        session_id = tick["AeronSessionID"]
-        sequence = tick["AeronSequence"]
-        expected = self.expected_by_session.get(session_id, sequence)
-        if sequence != expected:
-            raise SequenceGapError(
-                f"Aeron sequence discontinuity session={session_id} "
-                f"expected={expected} actual={sequence}"
-            )
-        self.expected_by_session[session_id] = sequence + 1
-        self.last[tick["Contract"]] = tick
-        self.queue.put(tick)
-        return tick
-
-    def run_forever(self) -> None:
-        while True:
-            self.receive_once()
-
-    def close(self) -> None:
-        self.sock.close(linger=0)
-
-
-def run_tick_engine(_future_account, queues) -> None:
-    """Drop-in multiprocessing target for SnapshotService.md_process."""
-
-    if not queues:
-        raise ValueError("SnapshotService did not provide md_queue")
-    endpoint = os.environ.get(
-        "HPQUANT_AERON_ZMQ_ENDPOINT", "tcp://127.0.0.1:7101"
-    )
-    receive_hwm = int(os.environ.get("HPQUANT_AERON_ZMQ_RCVHWM", "100000"))
-    subscriber = AeronTickSubscriber(endpoint, queues[0], receive_hwm)
-    try:
-        subscriber.run_forever()
-    finally:
-        subscriber.close()

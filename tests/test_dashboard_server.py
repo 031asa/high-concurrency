@@ -6,7 +6,33 @@ import urllib.request
 from http.server import ThreadingHTTPServer
 from pathlib import Path
 
-from dashboard.server import DashboardHandler, collect_status
+from dashboard.server import DashboardHandler, collect_status, collect_time_sync_status
+
+
+NOW_MS = 1767333600000  # 2026-01-02T06:00:00Z
+
+
+def time_report(platform, offset_ms, generated_at="2026-01-02T06:00:00.000Z"):
+    return {
+        "schema": 1,
+        "platform": platform,
+        "hostname": f"{platform}-host",
+        "generated_at_utc": generated_at,
+        "authority": {
+            "name": "Approved Exchange Time",
+            "url": "https://time.example.test/",
+            "ntp_servers": ["192.0.2.10"],
+            "environment": "production",
+        },
+        "selected_source": "192.0.2.10",
+        "authority_minus_local_ms": offset_ms,
+        "uncertainty_ms": 0.5,
+        "max_abs_sample_ms": abs(offset_ms),
+        "max_offset_ms": 5,
+        "max_cross_difference_ms": 5,
+        "pass": True,
+        "failure": "",
+    }
 
 
 class DashboardStatusTests(unittest.TestCase):
@@ -31,6 +57,7 @@ class DashboardStatusTests(unittest.TestCase):
             )
             rows = [
                 {"timestamp_ms": 1, "status": "RUNNING", "received": 10, "rate_per_second": 20.0,
+                 "mean_ms": 1.25,
                  "quote": {"instrument": "IF2609", "last_price": 4012.4},
                  "latency_by_time": [{
                      "time_bin": "2026-01-02T09:30:00+08:00", "count": 9,
@@ -75,10 +102,61 @@ class DashboardStatusTests(unittest.TestCase):
         self.assertEqual(2.8, status["compute"]["latency_by_contract"][0]["p99_ms"])
         self.assertEqual(100, status["audit"]["received"])
         self.assertEqual([10, 100], [point["received"] for point in status["series"]])
+        self.assertEqual("absolute_timestamp_delta", status["market_observation"]["metric"])
+        self.assertEqual(1.25, status["market_observation"]["mean_abs_ms"])
+        self.assertEqual([1.25, None], [point["observed_delta_ms"] for point in status["series"]])
+
+    def test_time_sync_is_separate_and_unavailable_without_reports(self):
+        with tempfile.TemporaryDirectory() as directory:
+            status = collect_time_sync_status(Path(directory), now_ms=NOW_MS)
+
+        self.assertFalse(status["operation"]["dashboard_adjusts_clock"])
+        self.assertEqual("external_privileged", status["operation"]["execution"])
+        self.assertIn("-Apply", status["operation"]["windows"]["command"])
+        self.assertEqual("UNAVAILABLE", status["detection"]["status"])
+        self.assertEqual("MISSING", status["detection"]["windows"]["status"])
+        self.assertEqual("MISSING", status["detection"]["linux"]["status"])
+
+    def test_time_sync_detection_compares_fresh_authoritative_reports(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / "windows-time.json").write_text(
+                json.dumps(time_report("windows", 1.25)), encoding="utf-8"
+            )
+            (root / "linux-time.json").write_text(
+                json.dumps(time_report("linux", -0.75)), encoding="utf-8"
+            )
+
+            status = collect_time_sync_status(root, now_ms=NOW_MS)
+
+        detection = status["detection"]
+        self.assertEqual("PASS", detection["status"])
+        self.assertEqual("PASS", detection["windows"]["status"])
+        self.assertEqual("PASS", detection["linux"]["status"])
+        self.assertEqual(2.0, detection["comparison"]["cross_difference_ms"])
+        self.assertTrue(detection["comparison"]["authority_match"])
+
+    def test_time_sync_detection_rejects_stale_or_mismatched_reports(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            windows = time_report("windows", 1.0, "2026-01-02T05:00:00.000Z")
+            linux = time_report("linux", 9.0, "2026-01-02T05:00:00.000Z")
+            linux["authority"]["ntp_servers"] = ["192.0.2.11"]
+            (root / "windows-time.json").write_text(json.dumps(windows), encoding="utf-8")
+            (root / "linux-time.json").write_text(json.dumps(linux), encoding="utf-8")
+
+            status = collect_time_sync_status(root, now_ms=NOW_MS)
+
+        detection = status["detection"]
+        self.assertEqual("FAIL", detection["status"])
+        self.assertEqual("STALE", detection["windows"]["status"])
+        self.assertFalse(detection["comparison"]["authority_match"])
+        self.assertGreater(detection["comparison"]["cross_difference_ms"], 5)
 
     def test_http_health_and_status_endpoints(self):
         with tempfile.TemporaryDirectory() as directory:
             DashboardHandler.result_root = Path(directory)
+            DashboardHandler.time_report_root = Path(directory)
             server = ThreadingHTTPServer(("127.0.0.1", 0), DashboardHandler)
             thread = threading.Thread(target=server.serve_forever, daemon=True)
             thread.start()
@@ -88,12 +166,15 @@ class DashboardStatusTests(unittest.TestCase):
                     health = json.load(response)
                 with urllib.request.urlopen(base_url + "/api/status", timeout=2) as response:
                     status = json.load(response)
+                with urllib.request.urlopen(base_url + "/api/time-sync", timeout=2) as response:
+                    time_sync = json.load(response)
             finally:
                 server.shutdown()
                 server.server_close()
                 thread.join(timeout=2)
         self.assertEqual("ok", health["status"])
         self.assertEqual("IDLE", status["dashboard_status"])
+        self.assertEqual("UNAVAILABLE", time_sync["detection"]["status"])
 
 
 if __name__ == "__main__":

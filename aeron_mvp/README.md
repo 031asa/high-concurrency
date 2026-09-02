@@ -34,7 +34,7 @@ schema、stream ID、Archive 和消费者。
 - JDK 17；
 - `aeron-all-1.51.0.jar`；
 - `sbe-all-1.38.1.jar`。
-- `jeromq-0.6.0.jar`（Leader ZMQ 接口）。
+- `jeromq-0.6.0.jar`（通用 ZMQ 行情出口）。
 
 脚本不依赖任何开发者的绝对路径，按以下顺序发现依赖：显式环境变量、发行包内置 runtime、
 当前 Conda/PATH 中的 JDK 17、项目本地 `result/aeron-mvp-deps/`。JAR 和生成物不会提交
@@ -76,49 +76,36 @@ AERON_MVP_ACCEPTANCE result=SUCCESS ...
 AERON_MVP_ACCEPTANCE live_compute=SUCCESS live_audit=SUCCESS replay_match=YES
 ```
 
-## 接入已编译的 Leader hpquant 模块
+## 通用 ZMQ/SBE 行情出口
 
-接口位于 Aeron 原始行情 stream 的独立消费支路，而不是 Compute/Audit 结果层。Java 适配器
-订阅 SBE v3 原帧，以 ZMQ `PUSH` 发送两帧消息（`snapshot` topic + 原始 SBE bytes）；Leader
-侧 `hpquant.message.zmq_bus` 适配器使用 `PULL` 接收，完成 schema、字段和 sequence 校验后直接
-写入原 `md_queue`。Aeron 仍负责 IPC 与 Archive，ZMQ 只承担跨模块 TCP 边界。
-
-先验证不依赖 Leader 镜像的完整 live/replay 链路：
+出口位于 Aeron 原始行情 stream 的独立消费支路，而不是 Compute/Audit 结果层。
+`ZmqMarketDataEgress` 订阅 SBE v3 原帧，以 ZMQ `PUSH` 发送两帧消息：第一帧固定为
+`snapshot`，第二帧是未改写的 SBE bytes。Aeron 继续负责 IPC 与 Archive，ZMQ 只承担跨进程
+TCP 边界；下游项目自行实现 `PULL`、协议解码和队列适配。
 
 ```bash
-bash scripts/run_leader_zmq_smoke.sh 1000
+bash scripts/run_zmq_market_smoke.sh 1000
 ```
 
-接入 Leader 容器时，把 `aeron_mvp/leader_integration` 只读挂载到容器，并设置：
-
-```text
-PYTHONPATH=/opt/ydtrader-leader-integration:/opt/hpquant-market
-HPQUANT_MARKET_SOURCE=aeron-zmq
-HPQUANT_AERON_ZMQ_ENDPOINT=tcp://<high-concurrency-host>:7101
-```
-
-`sitecustomize.py` 仅在 `HPQUANT_MARKET_SOURCE=aeron-zmq` 时替换
-`hpquant.service.snapshot.run_tick_engine`；未设置时原数据源完全不变。镜像静态兼容性检查：
+正式运行出口：
 
 ```bash
-bash scripts/validate_hpquant_compiled_hook.sh hpquant-market:1.0.0
+bash aeron_mvp/run_java.sh zmq-egress \
+  --mode live \
+  --aeron-dir /dev/shm/ydtrader-aeron \
+  --endpoint tcp://0.0.0.0:7101
 ```
 
-生产运行建议先启动 Leader `PULL` 端，再启动 Java live adapter；任何发送超时或 sequence 缺口
-都会使进程失败，使用 checkpoint 和 Archive 的显式 `--mode replay --resume` 恢复，禁止静默跳过。
+下游只需连接 `tcp://<high-concurrency-host>:7101`。高并发包不包含下游业务包、Python
+monkey patch、`sitecustomize` 或下游队列实现。任何发送超时或 sequence 缺口都会使进程失败；
+使用 checkpoint 和 Archive 的显式 `--mode replay --resume` 恢复，禁止静默跳过。
 
 ### 输入与输出边界
 
-`run_leader_zmq_smoke.sh` 的 `live.summary.json` 和 `replay.summary.json` 同时保存完整
+`run_zmq_market_smoke.sh` 的 `live.summary.json` 和 `replay.summary.json` 同时保存完整
 `first_tick`、`last_tick`，包括行情时间、最新价、五档价量、成交量、成交额、持仓量、开高低收、
 涨跌停价、`sessionId + sequence`、schema version、来源和接收时间。两份摘要逐字节比较，用来证明
-实时流与 Archive replay 送到 Leader 边界的数据一致。
-
-当前接入层向 Leader **输出**的是一个完整 CTP 形状的 Python `dict`，并直接写入原
-`SnapshotService.md_queue`；它不把 Leader 的 Bar、Prediction 或其他业务结果反向发送给
-高并发项目。Leader 编译包内部处理后的业务输出必须在实际容器启动后，按照 Leader 原有 ZMQ
-输出端口单独验收。未执行该容器验收前，只能声明行情已经到达 Leader 的输入队列边界，不能声明
-Leader 已经产出 Bar、Prediction 或交易信号。
+实时流与 Archive replay 送到网络边界的数据一致。探针只用于本项目自测，不是下游项目适配器。
 
 运行证据和持久化 recording 保存在 `result/aeron-mvp/<run-id>/`。源码树中的 Java/SBE
 文件比现有 class 新时，验收脚本会自动重编译，避免 `git pull` 后继续运行旧 class。
@@ -146,6 +133,21 @@ YDApi 只填写一档，CTP 最多填写五档，任何缺失档位都输出空�
 HdrHistogram，不把逐笔延迟写磁盘；均值和样本标准差使用在线算法，分位数保留三位有效数字。
 全量行情仍只保存在 Archive。实时阶段显示 mean/std/max；
 精确 P95 在计算完成后由同一套统计代码写入最终快照。
+
+Dashboard 将系统对时和行情观测严格分为两个数据域：
+
+- “对时操作”只展示 Windows 与 Leader Linux 的受控脚本入口，页面自身不执行提权命令，
+  也不会修改系统时钟；
+- “对时检测”只读取 `windows-time.json` 与 `linux-time.json`，验证报告有效期、单端 offset、
+  授时源一致性、采样时间差和双端差值；可用 `--time-report-root` 指定报告目录，默认项目根目录，
+  `--time-report-max-age-seconds` 默认 300 秒；
+- 行情侧原有 `mean_ms / p95_ms / max_ms` 在页面中明确命名为“绝对行情观测差”，其定义是
+  `|本地回调接收时间 - 行情事件时间|`。它包含时钟差、网络、柜台、网关和回调排队，
+  不等于授时偏差，也绝不参与对时判定；
+- OpenCTP 历史回放继续隐藏实时观测差，只保留吞吐、归档与完整性结果。
+
+授时检测接口为 `GET /api/time-sync`，行情运行接口仍为 `GET /api/status`。生成同期报告后直接
+刷新页面即可，不需要重启 Dashboard。
 
 ## 易达 YDApi 实时行情
 
@@ -241,6 +243,6 @@ OpenCTP 7x24 环境可能重放历史交易日，因此其 market timestamp 适�
 bash aeron_mvp/build_release.sh
 ```
 
-生成 `result/ydtrader-aeron-mvp-java-0.7.0-linux-x86_64.tar.gz`，包含精简 Java 17
+生成 `result/ydtrader-aeron-mvp-java-0.7.1-linux-x86_64.tar.gz`，包含精简 Java 17
 运行时、Aeron runtime 和 Dashboard 静态资源；核心验收无需预装 Java或联网下载依赖，
 Dashboard 和 Python bridge 需目标机安装 Miniconda，并按包内 `environment.yml` 创建环境。

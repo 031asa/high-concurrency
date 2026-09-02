@@ -3,361 +3,111 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>YDTrader · Aeron 实时监控</title>
+  <title>YDTrader · 授时与行情观测</title>
   <style>
     :root {
-      color-scheme: dark;
-      --bg: #071019;
-      --panel: #0d1a25;
-      --panel-2: #122331;
-      --line: #243847;
-      --text: #edf7f6;
-      --muted: #8ea6ad;
-      --cyan: #4be3c2;
-      --blue: #59a7ff;
-      --amber: #ffbf69;
-      --red: #ff6b7a;
-      font-family: Inter, "Segoe UI", "Microsoft YaHei", sans-serif;
+      color-scheme: dark; --bg:#061019; --panel:#0d1b27; --panel-soft:#112331;
+      --line:#223a49; --line-strong:#315467; --text:#edf7f6; --muted:#8faab2;
+      --cyan:#49e1c0; --blue:#58a8ff; --amber:#ffbf69; --red:#ff7280; --purple:#a68bff;
+      font-family:Inter,"Segoe UI","Microsoft YaHei",sans-serif;
     }
-    * { box-sizing: border-box; }
-    body {
-      margin: 0;
-      min-height: 100vh;
-      background:
-        radial-gradient(circle at 85% -10%, rgba(75, 227, 194, .14), transparent 32rem),
-        radial-gradient(circle at -10% 35%, rgba(89, 167, 255, .10), transparent 28rem),
-        var(--bg);
-      color: var(--text);
-    }
-    .shell { width: min(1440px, calc(100% - 40px)); margin: 0 auto; padding: 32px 0 44px; }
-    header { display: flex; align-items: flex-start; justify-content: space-between; gap: 24px; margin-bottom: 26px; }
-    .eyebrow { color: var(--cyan); letter-spacing: .16em; font-size: 12px; font-weight: 700; text-transform: uppercase; }
-    h1 { margin: 8px 0 7px; font-size: clamp(27px, 4vw, 44px); letter-spacing: -.04em; font-weight: 650; }
-    .subtitle { color: var(--muted); font-size: 14px; }
-    .status-pill { display: flex; align-items: center; gap: 9px; padding: 10px 14px; border: 1px solid var(--line); border-radius: 999px; background: rgba(13, 26, 37, .85); font-size: 13px; }
-    .dot { width: 9px; height: 9px; border-radius: 50%; background: var(--muted); box-shadow: 0 0 0 4px rgba(142, 166, 173, .12); }
-    .dot.running { background: var(--blue); box-shadow: 0 0 0 4px rgba(89, 167, 255, .15); animation: pulse 1.4s infinite; }
-    .dot.success { background: var(--cyan); box-shadow: 0 0 0 4px rgba(75, 227, 194, .15); }
-    .dot.failed, .dot.incomplete { background: var(--red); box-shadow: 0 0 0 4px rgba(255, 107, 122, .14); }
-    @keyframes pulse { 50% { opacity: .45; } }
-    .runbar { display: grid; grid-template-columns: 1.5fr repeat(4, 1fr); gap: 1px; overflow: hidden; border: 1px solid var(--line); border-radius: 14px; background: var(--line); margin-bottom: 16px; }
-    .run-cell { background: var(--panel); padding: 13px 16px; min-width: 0; }
-    .label { color: var(--muted); font-size: 11px; letter-spacing: .08em; text-transform: uppercase; }
-    .run-value { margin-top: 5px; font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-    .metrics { display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; margin-bottom: 14px; }
-    .card, .chart-card, .table-card { border: 1px solid var(--line); border-radius: 16px; background: linear-gradient(145deg, rgba(18, 35, 49, .94), rgba(10, 23, 33, .95)); }
-    .card { padding: 20px; min-height: 132px; }
-    .metric { margin: 14px 0 5px; font-variant-numeric: tabular-nums; font-size: clamp(25px, 3vw, 36px); font-weight: 650; letter-spacing: -.04em; }
-    .metric small { color: var(--muted); font-size: 13px; font-weight: 500; letter-spacing: 0; }
-    .hint { color: var(--muted); font-size: 12px; }
-    .progress { height: 4px; margin-top: 13px; border-radius: 5px; overflow: hidden; background: #20313d; }
-    .progress > div { height: 100%; width: 0; background: linear-gradient(90deg, var(--blue), var(--cyan)); transition: width .35s; }
-    .charts { display: grid; grid-template-columns: 1.6fr 1fr; gap: 14px; margin-bottom: 14px; }
-    .chart-card { padding: 19px 20px 15px; min-height: 310px; }
-    .section-title { margin: 0; font-size: 15px; font-weight: 600; }
-    .section-meta { margin: 6px 0 13px; color: var(--muted); font-size: 12px; }
-    svg { width: 100%; height: 225px; overflow: visible; }
-    .grid-line { stroke: #203440; stroke-width: 1; }
-    .axis-label { fill: #78929a; font-size: 10px; }
-    .chart-line { fill: none; stroke: var(--cyan); stroke-width: 2.2; vector-effect: non-scaling-stroke; }
-    .chart-area { fill: url(#areaGradient); opacity: .32; }
-    #latency-line { stroke: var(--blue); }
-    .table-card { padding: 20px; }
-    .latency-table { min-width: 860px; }
-    .latency-table td:first-child, .latency-table th:first-child { white-space: nowrap; }
-    .empty-row { color: var(--muted); text-align: center !important; }
-    .section-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 18px; }
-    .depth-control { display: flex; align-items: center; gap: 8px; color: var(--muted); font-size: 12px; white-space: nowrap; }
-    .depth-control select { color: var(--text); background: var(--panel-2); border: 1px solid var(--line); border-radius: 8px; padding: 6px 9px; }
-    .bid-value { color: var(--cyan); }
-    .ask-value { color: var(--red); }
-    table { width: 100%; border-collapse: collapse; margin-top: 12px; font-size: 13px; }
-    th, td { padding: 12px 10px; border-top: 1px solid var(--line); text-align: right; font-variant-numeric: tabular-nums; }
-    th:first-child, td:first-child { text-align: left; }
-    th { color: var(--muted); font-size: 11px; font-weight: 600; }
-    .ok { color: var(--cyan); }
-    .bad { color: var(--red); }
-    .notice { display: none; margin-bottom: 14px; padding: 12px 15px; color: var(--amber); border: 1px solid rgba(255,191,105,.35); border-radius: 12px; background: rgba(255,191,105,.07); font-size: 12px; }
-    footer { display: flex; justify-content: space-between; gap: 16px; margin-top: 16px; color: var(--muted); font-size: 11px; }
-    @media (max-width: 900px) {
-      .metrics { grid-template-columns: repeat(2, 1fr); }
-      .charts { grid-template-columns: 1fr; }
-      .runbar { grid-template-columns: repeat(2, 1fr); }
-      .run-cell:first-child { grid-column: span 2; }
-    }
-    @media (max-width: 560px) {
-      .shell { width: min(100% - 24px, 1440px); padding-top: 22px; }
-      header { flex-direction: column; }
-      .metrics { grid-template-columns: 1fr; }
-      .runbar { grid-template-columns: 1fr; }
-      .run-cell:first-child { grid-column: auto; }
-      .table-wrap { overflow-x: auto; }
-    }
+    *{box-sizing:border-box} body{margin:0;min-height:100vh;color:var(--text);background:radial-gradient(circle at 88% -8%,rgba(73,225,192,.14),transparent 34rem),radial-gradient(circle at -8% 28%,rgba(88,168,255,.11),transparent 30rem),var(--bg)}
+    button,select{font:inherit}.shell{width:min(1480px,calc(100% - 40px));margin:0 auto;padding:30px 0 44px}
+    header{display:flex;align-items:flex-start;justify-content:space-between;gap:24px;margin-bottom:22px}.eyebrow{color:var(--cyan);letter-spacing:.16em;font-size:11px;font-weight:750;text-transform:uppercase}
+    h1{margin:8px 0 7px;font-size:clamp(28px,4vw,45px);letter-spacing:-.045em;font-weight:680}.subtitle{max-width:760px;color:var(--muted);font-size:14px;line-height:1.65}
+    .status-pill,.mini-pill{display:inline-flex;align-items:center;gap:8px;border:1px solid var(--line);border-radius:999px;background:rgba(13,27,39,.88);white-space:nowrap}.status-pill{padding:10px 14px;font-size:13px}.mini-pill{padding:5px 9px;color:var(--muted);font-size:10px;font-weight:700;letter-spacing:.06em}
+    .mini-pill.pass{color:var(--cyan);border-color:rgba(73,225,192,.35)}.mini-pill.fail,.mini-pill.invalid{color:var(--red);border-color:rgba(255,114,128,.35)}.mini-pill.partial,.mini-pill.stale{color:var(--amber);border-color:rgba(255,191,105,.35)}
+    .dot{width:9px;height:9px;border-radius:50%;background:var(--muted);box-shadow:0 0 0 4px rgba(143,170,178,.12)}.dot.running{background:var(--blue);box-shadow:0 0 0 4px rgba(88,168,255,.15);animation:pulse 1.4s infinite}.dot.success,.dot.pass{background:var(--cyan);box-shadow:0 0 0 4px rgba(73,225,192,.15)}.dot.failed,.dot.incomplete,.dot.fail{background:var(--red);box-shadow:0 0 0 4px rgba(255,114,128,.14)}@keyframes pulse{50%{opacity:.42}}
+    .domain{margin-bottom:18px;border:1px solid var(--line);border-radius:20px;overflow:hidden;background:rgba(8,21,31,.72)}.domain-head{display:flex;justify-content:space-between;gap:28px;padding:20px 22px;border-bottom:1px solid var(--line)}
+    .domain-kicker{color:var(--blue);font-size:11px;font-weight:750;letter-spacing:.12em;text-transform:uppercase}.domain-clock .domain-kicker{color:var(--purple)}.domain-title{margin:5px 0 4px;font-size:21px;letter-spacing:-.02em}.domain-description{color:var(--muted);font-size:12px;line-height:1.6}.domain-rule{align-self:center;max-width:420px;padding:10px 13px;color:var(--amber);border:1px solid rgba(255,191,105,.3);border-radius:12px;background:rgba(255,191,105,.06);font-size:11px;line-height:1.55}.domain-body{padding:16px}
+    .time-layout{display:grid;grid-template-columns:.95fr 1.55fr;gap:14px}.panel,.card,.chart-card,.table-card{border:1px solid var(--line);border-radius:15px;background:linear-gradient(145deg,rgba(17,35,49,.94),rgba(9,23,33,.96))}.panel{padding:18px}.panel-head{display:flex;align-items:flex-start;justify-content:space-between;gap:14px;margin-bottom:13px}.section-title{margin:0;font-size:15px;font-weight:650}.section-meta{margin:5px 0 12px;color:var(--muted);font-size:11px;line-height:1.55}
+    .operation-list{display:grid;gap:10px}.operation-item{padding:12px;border:1px solid var(--line);border-radius:12px;background:rgba(4,14,22,.35)}.operation-top{display:flex;justify-content:space-between;gap:10px;margin-bottom:8px}.operation-title{font-size:12px;font-weight:650}.permission{color:var(--amber);font-size:10px}.command-row{display:grid;grid-template-columns:1fr auto;gap:8px;align-items:stretch}code{min-width:0;padding:9px 10px;overflow:hidden;color:#b8d8df;border-radius:8px;background:#06131d;font-family:"Cascadia Code",Consolas,monospace;font-size:10px;line-height:1.45;overflow-wrap:anywhere}.copy-button{padding:0 11px;color:var(--text);border:1px solid var(--line-strong);border-radius:8px;background:var(--panel-soft);cursor:pointer}.copy-button:hover{border-color:var(--blue);color:var(--blue)}.safety-note{margin-top:11px;color:var(--muted);font-size:10px;line-height:1.55}
+    .detection-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:9px;margin-bottom:12px}.detection-card{padding:12px;border:1px solid var(--line);border-radius:11px;background:rgba(4,14,22,.33)}.label{color:var(--muted);font-size:10px;letter-spacing:.08em;text-transform:uppercase}.detection-value{margin-top:8px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:17px;font-weight:650;font-variant-numeric:tabular-nums}.detection-hint{margin-top:4px;color:var(--muted);font-size:10px}.failure-box{display:none;margin-top:10px;padding:10px 12px;color:var(--red);border:1px solid rgba(255,114,128,.28);border-radius:10px;background:rgba(255,114,128,.06);font-size:11px;line-height:1.55}
+    .runbar{display:grid;grid-template-columns:1.5fr repeat(4,1fr);gap:1px;overflow:hidden;border:1px solid var(--line);border-radius:13px;background:var(--line);margin-bottom:14px}.run-cell{min-width:0;padding:12px 15px;background:var(--panel)}.run-value{margin-top:5px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:12px}.notice{margin-bottom:14px;padding:11px 14px;color:var(--amber);border:1px solid rgba(255,191,105,.32);border-radius:11px;background:rgba(255,191,105,.06);font-size:11px;line-height:1.55}#ctp-notice{display:none}
+    .metrics{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:12px}.card{padding:18px;min-height:126px}.metric{margin:13px 0 5px;font-size:clamp(24px,3vw,35px);font-weight:680;letter-spacing:-.04em;font-variant-numeric:tabular-nums}.metric small{color:var(--muted);font-size:12px;font-weight:500;letter-spacing:0}.hint{color:var(--muted);font-size:11px;line-height:1.45}.progress{height:4px;margin-top:12px;overflow:hidden;border-radius:5px;background:#203541}.progress>div{height:100%;width:0;background:linear-gradient(90deg,var(--blue),var(--cyan));transition:width .35s}
+    .charts{display:grid;grid-template-columns:1.55fr 1fr;gap:12px;margin-bottom:12px}.chart-card{min-height:300px;padding:18px 19px 14px}svg{width:100%;height:220px;overflow:visible}.grid-line{stroke:#203742;stroke-width:1}.axis-label{fill:#78959d;font-size:10px}.chart-line{fill:none;stroke:var(--cyan);stroke-width:2.2;vector-effect:non-scaling-stroke}#observation-line{stroke:var(--blue)}
+    .table-card{padding:18px;margin-bottom:12px}.table-card:last-child{margin-bottom:0}.section-head{display:flex;align-items:flex-start;justify-content:space-between;gap:18px}.table-wrap{overflow-x:auto}table{width:100%;border-collapse:collapse;margin-top:11px;font-size:12px}th,td{padding:11px 9px;border-top:1px solid var(--line);text-align:right;font-variant-numeric:tabular-nums}th:first-child,td:first-child{text-align:left}th{color:var(--muted);font-size:10px;font-weight:650;white-space:nowrap}.report-table td:nth-child(2){text-align:left}.latency-table{min-width:850px}.latency-table td:first-child{white-space:nowrap}.empty-row{color:var(--muted);text-align:center!important}.depth-control{display:flex;align-items:center;gap:8px;color:var(--muted);font-size:11px;white-space:nowrap}.depth-control select{padding:6px 9px;color:var(--text);border:1px solid var(--line);border-radius:8px;background:var(--panel-soft)}.bid-value,.ok{color:var(--cyan)}.ask-value,.bad{color:var(--red)}footer{display:flex;justify-content:space-between;gap:16px;margin-top:15px;color:var(--muted);font-size:10px}
+    @media(max-width:1060px){.time-layout{grid-template-columns:1fr}.detection-grid{grid-template-columns:repeat(2,1fr)}.metrics{grid-template-columns:repeat(2,1fr)}.charts{grid-template-columns:1fr}}@media(max-width:760px){.shell{width:min(100% - 22px,1480px);padding-top:20px}header,.domain-head{flex-direction:column}.domain-rule{max-width:none}.runbar{grid-template-columns:repeat(2,1fr)}.run-cell:first-child{grid-column:span 2}}@media(max-width:520px){.detection-grid,.metrics,.runbar{grid-template-columns:1fr}.run-cell:first-child{grid-column:auto}.command-row{grid-template-columns:1fr}.copy-button{padding:8px}footer{flex-direction:column}}
   </style>
 </head>
 <body>
   <main class="shell">
-    <header>
-      <div>
-        <div class="eyebrow">YDTrader / Aeron Archive</div>
-        <h1>实时行情链路监控</h1>
-        <div class="subtitle">接收、归档、计算和审计状态的一站式观测面板</div>
-      </div>
-      <div class="status-pill"><span id="status-dot" class="dot"></span><span id="status-text">等待数据</span></div>
-    </header>
+    <header><div><div class="eyebrow">YDTrader / Clock & Market Observatory</div><h1>授时与行情观测中心</h1><div class="subtitle">权威授时负责校准和检测系统时钟；行情系统只测量行情事件时间与本机接收时间的观测差。两个域独立采集、独立判定。</div></div><div class="status-pill"><span id="status-dot" class="dot"></span><span id="status-text">等待行情数据</span></div></header>
 
-    <section class="runbar">
-      <div class="run-cell"><div class="label">Run ID</div><div id="run-id" class="run-value">—</div></div>
-      <div class="run-cell"><div class="label">行情源</div><div id="source" class="run-value">—</div></div>
-      <div class="run-cell"><div class="label">Recording</div><div id="recording" class="run-value">—</div></div>
-      <div class="run-cell"><div class="label">Archive Sync</div><div id="sync-level" class="run-value">—</div></div>
-      <div class="run-cell"><div class="label">开始时间 UTC</div><div id="started" class="run-value">—</div></div>
-    </section>
-
-    <div id="ctp-notice" class="notice">当前是 OpenCTP 历史回放行情：吞吐和完整性有效，但交易所时间不代表当前时刻，因此延迟指标不展示。</div>
-
-    <section class="metrics">
-      <article class="card">
-        <div class="label">处理进度</div>
-        <div class="metric"><span id="received">0</span> <small>/ <span id="expected">0</span></small></div>
-        <div id="progress-hint" class="hint">0.00%</div>
-        <div class="progress"><div id="progress-bar"></div></div>
-      </article>
-      <article class="card">
-        <div class="label">平均吞吐</div>
-        <div class="metric"><span id="rate">0</span> <small>msg/s</small></div>
-        <div class="hint">Compute Replay 消费速率</div>
-      </article>
-      <article class="card">
-        <div class="label">平均延迟</div>
-        <div class="metric"><span id="mean">—</span> <small>ms</small></div>
-        <div id="mean-hint" class="hint">本地接收时间 − 行情时间</div>
-      </article>
-      <article class="card">
-        <div class="label">P95 延迟</div>
-        <div class="metric"><span id="p95">—</span> <small>ms</small></div>
-        <div id="p95-hint" class="hint">完成后给出精确分位值</div>
-      </article>
-    </section>
-
-    <section class="charts">
-      <article class="chart-card">
-        <h2 class="section-title">吞吐曲线</h2>
-        <div class="section-meta">最近 720 个采样点 · 250ms 原始快照</div>
-        <svg id="rate-chart" viewBox="0 0 700 225" preserveAspectRatio="none" aria-label="吞吐曲线"></svg>
-      </article>
-      <article class="chart-card">
-        <h2 class="section-title">平均延迟曲线</h2>
-        <div class="section-meta">下游实时计算，不影响发布链路</div>
-        <svg id="latency-chart" viewBox="0 0 430 225" preserveAspectRatio="none" aria-label="延迟曲线"></svg>
-      </article>
-    </section>
-
-    <section class="table-card" style="margin-bottom:14px">
-      <h2 class="section-title">15 分钟延迟分布</h2>
-      <div class="section-meta">按行情时间分箱 · 实时在线聚合 · 单位 ms</div>
-      <div class="table-wrap">
-        <table class="latency-table">
-          <thead><tr><th>时间分箱</th><th>Count</th><th>Mean</th><th>Std</th><th>P50</th><th>P90</th><th>P95</th><th>P99</th><th>Max</th></tr></thead>
-          <tbody id="time-latency-body"><tr><td class="empty-row" colspan="9">等待延迟样本</td></tr></tbody>
-        </table>
+    <section class="domain domain-clock">
+      <div class="domain-head"><div><div class="domain-kicker">01 · 权威时钟域</div><h2 class="domain-title">系统对时</h2><div class="domain-description">对时操作负责校准；对时检测负责验证。检测数据只来自NTP/PTP标准报告。</div></div><div class="domain-rule">交易所行情不是授时源。行情时间戳不得用于修改系统时钟，也不得替代NTP/PTP检测结果。</div></div>
+      <div class="domain-body time-layout">
+        <article class="panel">
+          <div class="panel-head"><div><h3 class="section-title">对时操作</h3><div class="section-meta">由受控脚本在目标主机执行，Dashboard不持有提权能力。</div></div><span class="mini-pill">外部执行</span></div>
+          <div class="operation-list">
+            <div class="operation-item"><div class="operation-top"><span id="windows-operation-title" class="operation-title">Windows宿主对时</span><span class="permission">管理员权限</span></div><div class="command-row"><code id="windows-command">等待接口</code><button class="copy-button" data-copy="windows-command">复制</button></div></div>
+            <div class="operation-item"><div class="operation-top"><span id="linux-operation-title" class="operation-title">Leader原生Linux对时</span><span class="permission">sudo权限</span></div><div class="command-row"><code id="linux-command">等待接口</code><button class="copy-button" data-copy="linux-command">复制</button></div></div>
+          </div><div id="operation-message" class="safety-note">Dashboard只读，不会因页面刷新触发对时。</div>
+        </article>
+        <article class="panel">
+          <div class="panel-head"><div><h3 class="section-title">对时检测</h3><div class="section-meta">检查报告有效期、单端offset、授时源一致性和Windows/Linux双端差值。</div></div><span id="time-status" class="mini-pill">未检测</span></div>
+          <div class="detection-grid">
+            <div class="detection-card"><div class="label">授时源</div><div id="authority" class="detection-value">—</div><div id="authority-env" class="detection-hint">等待报告</div></div>
+            <div class="detection-card"><div class="label">Windows Offset</div><div class="detection-value"><span id="windows-offset">—</span> <small>ms</small></div><div id="windows-age" class="detection-hint">未生成报告</div></div>
+            <div class="detection-card"><div class="label">Linux Offset</div><div class="detection-value"><span id="linux-offset">—</span> <small>ms</small></div><div id="linux-age" class="detection-hint">未生成报告</div></div>
+            <div class="detection-card"><div class="label">双端差值</div><div class="detection-value"><span id="cross-offset">—</span> <small>ms</small></div><div id="cross-limit" class="detection-hint">需要两份同期报告</div></div>
+          </div>
+          <div class="table-wrap"><table class="report-table"><thead><tr><th>平台</th><th>状态</th><th>选中源</th><th>Offset ms</th><th>不确定度 ms</th><th>报告时间 UTC</th></tr></thead><tbody id="time-report-body"><tr><td class="empty-row" colspan="6">等待授时检测报告</td></tr></tbody></table></div><div id="time-failures" class="failure-box"></div>
+        </article>
       </div>
     </section>
 
-    <section class="table-card" style="margin-bottom:14px">
-      <h2 class="section-title">合约延迟分布</h2>
-      <div class="section-meta">按合约汇总 · 分位数使用三位有效数字 HdrHistogram</div>
-      <div class="table-wrap">
-        <table class="latency-table">
-          <thead><tr><th>合约</th><th>Count</th><th>Mean</th><th>Std</th><th>P50</th><th>P90</th><th>P95</th><th>P99</th><th>Max</th></tr></thead>
-          <tbody id="contract-latency-body"><tr><td class="empty-row" colspan="9">等待延迟样本</td></tr></tbody>
-        </table>
+    <section class="domain">
+      <div class="domain-head"><div><div class="domain-kicker">02 · 行情观测域</div><h2 class="domain-title">实时行情链路</h2><div class="domain-description">接收、归档、计算和审计行情；行情时间差只描述观测现象，不参与系统对时。</div></div><div class="domain-rule">绝对行情观测差 = |本地回调接收时间 − 行情事件时间|，其中包含时钟差、网络、柜台、网关和回调排队。</div></div>
+      <div class="domain-body">
+        <section class="runbar"><div class="run-cell"><div class="label">Run ID</div><div id="run-id" class="run-value">—</div></div><div class="run-cell"><div class="label">行情源</div><div id="source" class="run-value">—</div></div><div class="run-cell"><div class="label">Recording</div><div id="recording" class="run-value">—</div></div><div class="run-cell"><div class="label">Archive刷盘级别</div><div id="sync-level" class="run-value">—</div></div><div class="run-cell"><div class="label">开始时间 UTC</div><div id="started" class="run-value">—</div></div></section>
+        <div id="ctp-notice" class="notice">当前行情属于历史回放：吞吐和完整性仍有效，但行情时间不代表当前时刻，因此不展示实时观测差。</div>
+        <section class="metrics">
+          <article class="card"><div class="label">处理进度</div><div class="metric"><span id="received">0</span> <small>/ <span id="expected">0</span></small></div><div id="progress-hint" class="hint">0.00%</div><div class="progress"><div id="progress-bar"></div></div></article>
+          <article class="card"><div class="label">平均吞吐</div><div class="metric"><span id="rate">0</span> <small>msg/s</small></div><div class="hint">Compute Replay消费速率</div></article>
+          <article class="card"><div class="label">平均绝对行情观测差</div><div class="metric"><span id="mean">—</span> <small>ms</small></div><div id="mean-hint" class="hint">不是授时偏差，不用于对时</div></article>
+          <article class="card"><div class="label">P95绝对行情观测差</div><div class="metric"><span id="p95">—</span> <small>ms</small></div><div id="p95-hint" class="hint">完成后给出精确分位值</div></article>
+        </section>
+        <section class="charts"><article class="chart-card"><h3 class="section-title">吞吐曲线</h3><div class="section-meta">最近720个采样点 · 250ms原始快照</div><svg id="rate-chart" viewBox="0 0 700 220" preserveAspectRatio="none" aria-label="吞吐曲线"></svg></article><article class="chart-card"><h3 class="section-title">绝对行情观测差曲线</h3><div class="section-meta">当前仍为全程累计均值；不表示系统时钟偏差</div><svg id="observation-chart" viewBox="0 0 430 220" preserveAspectRatio="none" aria-label="行情观测差曲线"></svg></article></section>
+        <section class="table-card"><h3 class="section-title">15分钟行情观测差分布</h3><div class="section-meta">按行情事件时间分箱 · 绝对时间差 · 单位ms</div><div class="table-wrap"><table class="latency-table"><thead><tr><th>时间分箱</th><th>Count</th><th>Mean</th><th>Std</th><th>P50</th><th>P90</th><th>P95</th><th>P99</th><th>Max</th></tr></thead><tbody id="time-observation-body"><tr><td class="empty-row" colspan="9">等待行情观测样本</td></tr></tbody></table></div></section>
+        <section class="table-card"><h3 class="section-title">合约行情观测差分布</h3><div class="section-meta">按合约汇总 · 分位数使用三位有效数字HdrHistogram</div><div class="table-wrap"><table class="latency-table"><thead><tr><th>合约</th><th>Count</th><th>Mean</th><th>Std</th><th>P50</th><th>P90</th><th>P95</th><th>P99</th><th>Max</th></tr></thead><tbody id="contract-observation-body"><tr><td class="empty-row" colspan="9">等待行情观测样本</td></tr></tbody></table></div></section>
+        <section class="table-card"><div class="section-head"><div><h3 class="section-title">最新采样行情</h3><div id="depth-source-hint" class="section-meta">从Compute下游快照读取；全量原始行情保存在Aeron Archive</div></div><label class="depth-control">显示档位<select id="depth-select" aria-label="显示盘口档位"><option value="1">1档</option><option value="2">2档</option><option value="3">3档</option><option value="4">4档</option><option value="5" selected>5档</option></select></label></div><div class="table-wrap"><table><thead><tr><th>序号</th><th>合约</th><th>交易日</th><th>行情时间</th><th>最新价</th></tr></thead><tbody><tr><td id="quote-sequence">—</td><td id="quote-instrument">等待行情</td><td id="quote-day">—</td><td id="quote-time">—</td><td id="quote-last">—</td></tr></tbody></table><table><thead><tr><th>档位</th><th>买价</th><th>买量</th><th>卖价</th><th>卖量</th></tr></thead><tbody id="depth-body"></tbody></table></div></section>
+        <section class="table-card"><h3 class="section-title">链路完整性与消费者状态</h3><div class="section-meta">此处的最大值是绝对行情观测差，不是系统授时偏差。</div><div class="table-wrap"><table><thead><tr><th>消费者</th><th>状态</th><th>已接收</th><th>序列缺口</th><th>重复</th><th>无效时间戳</th><th>最大观测差 ms</th></tr></thead><tbody><tr><td>Compute</td><td id="compute-status">—</td><td id="compute-received">0</td><td id="compute-gaps">0</td><td id="compute-duplicates">0</td><td id="compute-invalid">0</td><td id="compute-max">—</td></tr><tr><td>Audit</td><td id="audit-status">—</td><td id="audit-received">0</td><td id="audit-gaps">0</td><td id="audit-duplicates">0</td><td id="audit-invalid">0</td><td>—</td></tr></tbody></table></div></section>
+        <footer><span id="result-dir">结果目录：—</span><span id="updated">尚未刷新</span></footer>
       </div>
     </section>
-
-    <section class="table-card" style="margin-bottom:14px">
-      <div class="section-head">
-        <div>
-          <h2 class="section-title">最新采样行情</h2>
-          <div id="depth-source-hint" class="section-meta">从 Compute 下游快照读取；全量原始行情保存在 Aeron Archive</div>
-        </div>
-        <label class="depth-control">显示档位
-          <select id="depth-select" aria-label="显示盘口档位">
-            <option value="1">1 档</option><option value="2">2 档</option>
-            <option value="3">3 档</option><option value="4">4 档</option>
-            <option value="5" selected>5 档</option>
-          </select>
-        </label>
-      </div>
-      <div class="table-wrap">
-        <table>
-          <thead><tr><th>序号</th><th>合约</th><th>交易日</th><th>行情时间</th><th>最新价</th></tr></thead>
-          <tbody><tr><td id="quote-sequence">—</td><td id="quote-instrument">等待行情</td><td id="quote-day">—</td><td id="quote-time">—</td><td id="quote-last">—</td></tr></tbody>
-        </table>
-        <table>
-          <thead><tr><th>档位</th><th>买价</th><th>买量</th><th>卖价</th><th>卖量</th></tr></thead>
-          <tbody id="depth-body"></tbody>
-        </table>
-      </div>
-    </section>
-
-    <section class="table-card">
-      <h2 class="section-title">链路完整性与消费者状态</h2>
-      <div class="table-wrap">
-        <table>
-          <thead><tr><th>消费者</th><th>状态</th><th>已接收</th><th>序列缺口</th><th>重复</th><th>无效时间戳</th><th>最大延迟 ms</th></tr></thead>
-          <tbody>
-            <tr><td>Compute</td><td id="compute-status">—</td><td id="compute-received">0</td><td id="compute-gaps">0</td><td id="compute-duplicates">0</td><td id="compute-invalid">0</td><td id="compute-max">—</td></tr>
-            <tr><td>Audit</td><td id="audit-status">—</td><td id="audit-received">0</td><td id="audit-gaps">0</td><td id="audit-duplicates">0</td><td id="audit-invalid">0</td><td>—</td></tr>
-          </tbody>
-        </table>
-      </div>
-    </section>
-    <footer><span id="result-dir">结果目录：—</span><span id="updated">尚未刷新</span></footer>
   </main>
-
   <script>
-    const $ = id => document.getElementById(id);
-    const number = (value, digits = 0) => {
-      if (value === null || value === undefined || Number.isNaN(Number(value))) return '—';
-      return Number(value).toLocaleString('zh-CN', { maximumFractionDigits: digits, minimumFractionDigits: digits });
-    };
-    const escapeHtml = value => String(value ?? '').replace(
-      /[&<>"']/g,
-      character => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[character]
-    );
-    function renderLatencyTable(bodyId, rows, dimension, historicalLatency) {
-      const body = $(bodyId);
-      if (historicalLatency) {
-        body.innerHTML = '<tr><td class="empty-row" colspan="9">历史回放不展示实时链路延迟</td></tr>';
-        return;
-      }
-      const values = Array.isArray(rows) ? rows : [];
-      if (!values.length) {
-        body.innerHTML = '<tr><td class="empty-row" colspan="9">等待延迟样本</td></tr>';
-        return;
-      }
-      const visible = dimension === 'time_bin' ? values.slice(-96) : values;
-      body.innerHTML = visible.map(row => {
-        const rawLabel = row[dimension] || '—';
-        const label = dimension === 'time_bin' ? String(rawLabel).replace('T', ' ') : rawLabel;
-        return `<tr><td>${escapeHtml(label)}</td><td>${number(row.count)}</td>` +
-          `<td>${number(row.mean_ms, 3)}</td><td>${number(row.std_ms, 3)}</td>` +
-          `<td>${number(row.p50_ms, 3)}</td><td>${number(row.p90_ms, 3)}</td>` +
-          `<td>${number(row.p95_ms, 3)}</td><td>${number(row.p99_ms, 3)}</td>` +
-          `<td>${number(row.max_ms, 3)}</td></tr>`;
-      }).join('');
+    const $=id=>document.getElementById(id);
+    const number=(value,digits=0)=>value===null||value===undefined||value===''||Number.isNaN(Number(value))?'—':Number(value).toLocaleString('zh-CN',{maximumFractionDigits:digits,minimumFractionDigits:digits});
+    const escapeHtml=value=>String(value??'').replace(/[&<>"']/g,character=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'})[character]);
+    const stateLabel=value=>({RUNNING:'运行中',SUCCESS:'成功',FAILED:'失败',INCOMPLETE:'不完整',IDLE:'等待数据',PASS:'通过',FAIL:'失败',PARTIAL:'报告不完整',UNAVAILABLE:'未检测',MISSING:'缺少报告',INVALID:'报告无效',STALE:'报告过期',LIVE:'实时',HISTORICAL:'历史回放',SYNTHETIC:'合成测试'}[value]||value||'未知');
+    const statusClass=value=>({PASS:'pass',FAIL:'fail',PARTIAL:'partial',STALE:'stale',INVALID:'invalid'}[value]||'');
+    const ageText=report=>{if(!report||!report.available)return'未生成报告';if(report.age_seconds===null||report.age_seconds===undefined)return report.failure||'报告时间无效';const seconds=Math.abs(Number(report.age_seconds));return seconds<60?`${number(seconds,0)}秒前`:`${number(seconds/60,1)}分钟前`};
+    document.querySelectorAll('[data-copy]').forEach(button=>button.addEventListener('click',async()=>{const source=$(button.dataset.copy);try{await navigator.clipboard.writeText(source.textContent);const original=button.textContent;button.textContent='已复制';setTimeout(()=>{button.textContent=original},1200)}catch(_){button.textContent='复制失败'}}));
+    function renderTimeSync(data){
+      const operation=data.operation||{},detection=data.detection||{},windowsOperation=operation.windows||{},linuxOperation=operation.linux||{};
+      $('windows-operation-title').textContent=windowsOperation.title||'Windows宿主对时';$('linux-operation-title').textContent=linuxOperation.title||'Leader原生Linux对时';$('windows-command').textContent=windowsOperation.command||'未配置';$('linux-command').textContent=linuxOperation.command||'未配置';$('operation-message').textContent=operation.message||'Dashboard只读，不直接修改系统时间。';
+      const status=detection.status||'UNAVAILABLE';$('time-status').textContent=stateLabel(status);$('time-status').className=`mini-pill ${statusClass(status)}`;
+      const windowsReport=detection.windows||{},linuxReport=detection.linux||{},comparison=detection.comparison||{},authority=windowsReport.authority&&windowsReport.authority.name?windowsReport.authority:(linuxReport.authority||{});
+      $('authority').textContent=authority.name||'—';const servers=Array.isArray(authority.ntp_servers)?authority.ntp_servers.join(', '):'';$('authority-env').textContent=authority.environment?`${authority.environment.toUpperCase()} · ${servers||'未列出NTP地址'}`:'等待报告';
+      $('windows-offset').textContent=number(windowsReport.offset_ms,3);$('linux-offset').textContent=number(linuxReport.offset_ms,3);$('windows-age').textContent=ageText(windowsReport);$('linux-age').textContent=ageText(linuxReport);$('cross-offset').textContent=number(comparison.cross_difference_ms,3);$('cross-limit').textContent=comparison.limit_ms===null||comparison.limit_ms===undefined?'需要两份同期报告':`门槛 ≤ ${number(comparison.limit_ms,3)} ms`;
+      const reports=[windowsReport,linuxReport];$('time-report-body').innerHTML=reports.map(report=>{const platform=report.platform==='windows'?'Windows':'Linux / WSL',state=report.status||'MISSING';return`<tr><td>${platform}</td><td><span class="mini-pill ${statusClass(state)}">${stateLabel(state)}</span></td><td>${escapeHtml(report.selected_source||'—')}</td><td>${number(report.offset_ms,3)}</td><td>${number(report.uncertainty_ms,3)}</td><td>${escapeHtml(report.generated_at_utc||'—')}</td></tr>`}).join('');
+      const failures=[];for(const report of reports)if(report.failure)failures.push(`${report.platform}: ${report.failure}`);for(const failure of(comparison.failures||[]))failures.push(failure);$('time-failures').style.display=failures.length?'block':'none';$('time-failures').textContent=failures.join('；');
     }
-    let latestQuote = {};
-    function renderDepth(quote) {
-      const requested = Number($('depth-select').value || 5);
-      const fallback = [{
-        level: 1, bid_price: quote.bid_price, bid_volume: quote.bid_volume,
-        ask_price: quote.ask_price, ask_volume: quote.ask_volume
-      }];
-      const depth = Array.isArray(quote.depth) ? quote.depth : fallback;
-      const rows = [];
-      for (let index = 0; index < requested; index++) {
-        const level = depth[index] || { level: index + 1 };
-        rows.push(`<tr><td>${index + 1}</td>` +
-          `<td class="bid-value">${number(level.bid_price, 4)}</td>` +
-          `<td>${number(level.bid_volume)}</td>` +
-          `<td class="ask-value">${number(level.ask_price, 4)}</td>` +
-          `<td>${number(level.ask_volume)}</td></tr>`);
-      }
-      $('depth-body').innerHTML = rows.join('');
-      const available = Math.max(1, Math.min(5, Number(quote.depth_levels || 1)));
-      $('depth-source-hint').textContent = quote.instrument ?
-        `数据源可用 ${available} 档；统一输出五档，缺失档位显示为空` :
-        '从 Compute 下游快照读取；全量原始行情保存在 Aeron Archive';
+    function renderObservationTable(bodyId,rows,dimension,hidden){const body=$(bodyId);if(hidden){body.innerHTML='<tr><td class="empty-row" colspan="9">历史回放不展示实时行情观测差</td></tr>';return}const values=Array.isArray(rows)?rows:[];if(!values.length){body.innerHTML='<tr><td class="empty-row" colspan="9">等待行情观测样本</td></tr>';return}const visible=dimension==='time_bin'?values.slice(-96):values;body.innerHTML=visible.map(row=>{const rawLabel=row[dimension]||'—',label=dimension==='time_bin'?String(rawLabel).replace('T',' '):rawLabel;return`<tr><td>${escapeHtml(label)}</td><td>${number(row.count)}</td><td>${number(row.mean_ms,3)}</td><td>${number(row.std_ms,3)}</td><td>${number(row.p50_ms,3)}</td><td>${number(row.p90_ms,3)}</td><td>${number(row.p95_ms,3)}</td><td>${number(row.p99_ms,3)}</td><td>${number(row.max_ms,3)}</td></tr>`}).join('')}
+    let latestQuote={};function renderDepth(quote){const requested=Number($('depth-select').value||5),fallback=[{level:1,bid_price:quote.bid_price,bid_volume:quote.bid_volume,ask_price:quote.ask_price,ask_volume:quote.ask_volume}],depth=Array.isArray(quote.depth)?quote.depth:fallback,rows=[];for(let index=0;index<requested;index++){const level=depth[index]||{level:index+1};rows.push(`<tr><td>${index+1}</td><td class="bid-value">${number(level.bid_price,4)}</td><td>${number(level.bid_volume)}</td><td class="ask-value">${number(level.ask_price,4)}</td><td>${number(level.ask_volume)}</td></tr>`)}$('depth-body').innerHTML=rows.join('');const available=Math.max(1,Math.min(5,Number(quote.depth_levels||1)));$('depth-source-hint').textContent=quote.instrument?`数据源可用${available}档；统一输出五档，缺失档位显示为空`:'从Compute下游快照读取；全量原始行情保存在Aeron Archive'}$('depth-select').addEventListener('change',()=>renderDepth(latestQuote));
+    function setStatusCell(id,status){const node=$(id);node.textContent=stateLabel(status);node.className=status==='SUCCESS'?'ok':status==='RUNNING'?'':'bad'}
+    function chart(svg,points,key,lineId,emptyLabel='等待采样数据'){const width=svg.viewBox.baseVal.width,height=svg.viewBox.baseVal.height,pad={left:44,right:10,top:12,bottom:23},plotted=points.map(point=>point[key]).filter(value=>value!==null&&value!==undefined&&Number.isFinite(Number(value))).map(Number),max=Math.max(1,...plotted),min=Math.min(0,...plotted),x=index=>pad.left+(plotted.length<=1?0:index*(width-pad.left-pad.right)/(plotted.length-1)),y=value=>pad.top+(max-value)*(height-pad.top-pad.bottom)/Math.max(1e-9,max-min);let html='';for(let index=0;index<=4;index++){const gridY=pad.top+index*(height-pad.top-pad.bottom)/4,value=max-index*(max-min)/4;html+=`<line class="grid-line" x1="${pad.left}" y1="${gridY}" x2="${width-pad.right}" y2="${gridY}"/><text class="axis-label" x="0" y="${gridY+3}">${number(value,value<10?2:0)}</text>`}if(plotted.length)html+=`<polyline id="${lineId}" class="chart-line" points="${plotted.map((value,index)=>`${x(index)},${y(value)}`).join(' ')}"/>`;else html+=`<text class="axis-label" x="${width/2-60}" y="${height/2}">${emptyLabel}</text>`;svg.innerHTML=html}
+    function renderMarket(data){
+      const run=data.run||{},compute=data.compute||{},audit=data.audit||{},observation=data.market_observation||{},state=data.dashboard_status||'IDLE';$('status-text').textContent=stateLabel(state);$('status-dot').className=`dot ${state.toLowerCase()}`;$('run-id').textContent=run.id||'—';$('source').textContent=(run.source||'—').toUpperCase();$('recording').textContent=run.recording_id??'—';$('sync-level').textContent=run.sync_level??'—';$('started').textContent=run.started_at_utc||'—';$('result-dir').textContent=`结果目录：${run.result_dir||'—'}`;
+      const hidden=observation.valid_for_live_observation===false||run.latency_mode==='historical_replay';$('ctp-notice').style.display=hidden?'block':'none';const expected=Number(run.expected_count||compute.expected||0),received=Number(compute.received||0),percent=expected?Math.min(100,received*100/expected):0;$('received').textContent=number(received);$('expected').textContent=number(expected);$('progress-hint').textContent=`${number(percent,2)}%`;$('progress-bar').style.width=`${percent}%`;$('rate').textContent=number(compute.rate_per_second);$('mean').textContent=hidden?'—':number(observation.mean_abs_ms,3);$('p95').textContent=hidden?'—':number(observation.p95_abs_ms,3);$('mean-hint').textContent=hidden?'历史行情时间，不计算实时观测差':'不是授时偏差，不用于对时';$('p95-hint').textContent=hidden?'切换实时行情源后启用':'完成后给出精确分位值';
+      renderObservationTable('time-observation-body',compute.latency_by_time,'time_bin',hidden);renderObservationTable('contract-observation-body',compute.latency_by_contract,'contract',hidden);for(const[prefix,value]of[['compute',compute],['audit',audit]]){setStatusCell(`${prefix}-status`,value.status);$(`${prefix}-received`).textContent=number(value.received||0);$(`${prefix}-gaps`).textContent=number(value.gaps||0);$(`${prefix}-duplicates`).textContent=number(value.duplicates||0);$(`${prefix}-invalid`).textContent=number(value.invalid_timestamps||0)}$('compute-max').textContent=hidden?'—':number(observation.max_abs_ms,3);
+      const quote=compute.quote||{};latestQuote=quote;$('quote-sequence').textContent=number(quote.sequence);$('quote-instrument').textContent=quote.instrument||'等待行情';$('quote-day').textContent=quote.trading_day||'—';$('quote-time').textContent=quote.market_time||'—';$('quote-last').textContent=number(quote.last_price,4);renderDepth(quote);chart($('rate-chart'),data.series||[],'rate_per_second','rate-line');chart($('observation-chart'),hidden?[]:(data.series||[]),'observed_delta_ms','observation-line',hidden?'历史回放不展示观测差':'等待采样数据');$('updated').textContent=`刷新于 ${new Date(data.generated_at_ms).toLocaleTimeString('zh-CN')}`;
     }
-    $('depth-select').addEventListener('change', () => renderDepth(latestQuote));
-    const statusLabel = value => ({ RUNNING: '运行中', SUCCESS: '成功', FAILED: '失败', INCOMPLETE: '不完整', IDLE: '等待数据' }[value] || value || '等待数据');
-    function setStatusCell(id, status) {
-      const node = $(id); node.textContent = statusLabel(status);
-      node.className = status === 'SUCCESS' ? 'ok' : (status === 'RUNNING' ? '' : 'bad');
-    }
-    function chart(svg, points, key, lineId, emptyLabel = '等待采样数据') {
-      const width = svg.viewBox.baseVal.width, height = svg.viewBox.baseVal.height;
-      const pad = { left: 44, right: 10, top: 12, bottom: 24 };
-      const clean = points.map(p => Number(p[key])).filter(Number.isFinite);
-      const max = Math.max(1, ...clean), min = Math.min(0, ...clean);
-      const x = i => pad.left + (points.length <= 1 ? 0 : i * (width - pad.left - pad.right) / (points.length - 1));
-      const y = value => pad.top + (max - value) * (height - pad.top - pad.bottom) / Math.max(1e-9, max - min);
-      let html = '<defs><linearGradient id="areaGradient" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#4be3c2"/><stop offset="1" stop-color="#4be3c2" stop-opacity="0"/></linearGradient></defs>';
-      for (let i = 0; i <= 4; i++) {
-        const gy = pad.top + i * (height - pad.top - pad.bottom) / 4;
-        const val = max - i * (max - min) / 4;
-        html += `<line class="grid-line" x1="${pad.left}" y1="${gy}" x2="${width-pad.right}" y2="${gy}"/><text class="axis-label" x="0" y="${gy+3}">${number(val, val < 10 ? 2 : 0)}</text>`;
-      }
-      const coords = points.map((p, i) => `${x(i)},${y(Number(p[key]) || 0)}`).join(' ');
-      if (coords) {
-        html += `<polyline id="${lineId}" class="chart-line" points="${coords}"/>`;
-      }
-      if (!points.length) html += `<text class="axis-label" x="${width/2-55}" y="${height/2}">${emptyLabel}</text>`;
-      svg.innerHTML = html;
-    }
-    function render(data) {
-      const run = data.run || {}, compute = data.compute || {}, audit = data.audit || {};
-      const state = data.dashboard_status || 'IDLE';
-      $('status-text').textContent = statusLabel(state);
-      $('status-dot').className = `dot ${state.toLowerCase()}`;
-      $('run-id').textContent = run.id || '—'; $('source').textContent = (run.source || '—').toUpperCase();
-      $('recording').textContent = run.recording_id || '—'; $('sync-level').textContent = run.sync_level ?? '—';
-      $('started').textContent = run.started_at_utc || '—'; $('result-dir').textContent = `结果目录：${run.result_dir || '—'}`;
-      const historicalLatency = run.latency_mode === 'historical_replay';
-      $('ctp-notice').style.display = historicalLatency ? 'block' : 'none';
-      const expected = Number(run.expected_count || compute.expected || 0), received = Number(compute.received || 0);
-      const percent = expected ? Math.min(100, received * 100 / expected) : 0;
-      $('received').textContent = number(received); $('expected').textContent = number(expected);
-      $('progress-hint').textContent = `${number(percent, 2)}%`;
-      $('progress-bar').style.width = `${percent}%`;
-      $('rate').textContent = number(compute.rate_per_second);
-      $('mean').textContent = historicalLatency ? '—' : number(compute.mean_ms, 3);
-      $('p95').textContent = historicalLatency ? '—' : number(compute.p95_ms, 3);
-      $('mean-hint').textContent = historicalLatency ? '历史行情时间，不计算实时链路延迟' : '本地接收时间 − 行情时间';
-      $('p95-hint').textContent = historicalLatency ? '切换实时行情源后启用' : '完成后给出精确分位值';
-      renderLatencyTable('time-latency-body', compute.latency_by_time, 'time_bin', historicalLatency);
-      renderLatencyTable(
-        'contract-latency-body', compute.latency_by_contract, 'contract', historicalLatency
-      );
-      for (const [prefix, value] of [['compute', compute], ['audit', audit]]) {
-        setStatusCell(`${prefix}-status`, value.status);
-        $(`${prefix}-received`).textContent = number(value.received || 0);
-        $(`${prefix}-gaps`).textContent = number(value.gaps || 0);
-        $(`${prefix}-duplicates`).textContent = number(value.duplicates || 0);
-        $(`${prefix}-invalid`).textContent = number(value.invalid_timestamps || 0);
-      }
-      $('compute-max').textContent = historicalLatency ? '—' : number(compute.max_ms, 3);
-      const quote = compute.quote || {};
-      latestQuote = quote;
-      $('quote-sequence').textContent = number(quote.sequence);
-      $('quote-instrument').textContent = quote.instrument || '等待行情';
-      $('quote-day').textContent = quote.trading_day || '—';
-      $('quote-time').textContent = quote.market_time || '—';
-      $('quote-last').textContent = number(quote.last_price, 4);
-      renderDepth(quote);
-      chart($('rate-chart'), data.series || [], 'rate_per_second', 'rate-line');
-      chart(
-        $('latency-chart'),
-        historicalLatency ? [] : (data.series || []),
-        'mean_ms',
-        'latency-line',
-        historicalLatency ? '历史回放不展示延迟' : '等待采样数据'
-      );
-      $('updated').textContent = `刷新于 ${new Date(data.generated_at_ms).toLocaleTimeString('zh-CN')}`;
-    }
-    async function refresh() {
-      try {
-        const response = await fetch('/api/status', { cache: 'no-store' });
-        if (!response.ok) throw new Error(`HTTP ${response.status}`);
-        render(await response.json());
-      } catch (error) {
-        $('status-text').textContent = `连接失败：${error.message}`;
-        $('status-dot').className = 'dot failed';
-      }
-    }
-    refresh(); setInterval(refresh, 1000);
+    async function getJson(path){const response=await fetch(path,{cache:'no-store'});if(!response.ok)throw new Error(`${path} HTTP ${response.status}`);return response.json()}
+    async function refresh(){const[market,timeSync]=await Promise.allSettled([getJson('/api/status'),getJson('/api/time-sync')]);if(market.status==='fulfilled')renderMarket(market.value);else{$('status-text').textContent=`行情接口失败：${market.reason.message}`;$('status-dot').className='dot failed'}if(timeSync.status==='fulfilled')renderTimeSync(timeSync.value);else{$('time-status').textContent='检测接口失败';$('time-status').className='mini-pill fail'}}
+    renderDepth({});refresh();setInterval(refresh,1000);
   </script>
 </body>
 </html>
