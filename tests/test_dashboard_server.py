@@ -41,6 +41,39 @@ class DashboardStatusTests(unittest.TestCase):
             status = collect_status(Path(directory))
         self.assertEqual("IDLE", status["dashboard_status"])
         self.assertIsNone(status["run"])
+        self.assertEqual([], status["source_selection"]["available"])
+
+    def test_status_can_select_latest_run_for_a_market_source(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            runs = [
+                ("20260103T000000Z-3", "ctp-live"),
+                ("20260102T000000Z-2", "ydapi"),
+                ("20260101T000000Z-1", "ydapi"),
+            ]
+            for run_id, source in runs:
+                run = root / run_id
+                run.mkdir()
+                (run / "run.meta").write_text(
+                    f"run_id={run_id}\nsource={source}\nstatus=SUCCESS\n"
+                    f"started_at_utc={run_id[:8]}T00:00:00Z\n",
+                    encoding="utf-8",
+                )
+
+            automatic = collect_status(root)
+            selected = collect_status(root, source="ydapi")
+            missing = collect_status(root, source="openctp")
+
+        self.assertEqual("ctp-live", automatic["run"]["source"])
+        self.assertEqual("20260102T000000Z-2", selected["run"]["id"])
+        self.assertEqual("ydapi", selected["source_selection"]["requested"])
+        self.assertEqual("ydapi", selected["source_selection"]["selected"])
+        self.assertEqual(
+            ["ctp-live", "ydapi"],
+            [item["value"] for item in selected["source_selection"]["available"]],
+        )
+        self.assertEqual("IDLE", missing["dashboard_status"])
+        self.assertEqual("openctp", missing["source_selection"]["requested"])
 
     def test_latest_run_merges_progress_and_final_summary(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -164,7 +197,7 @@ class DashboardStatusTests(unittest.TestCase):
                 base_url = f"http://127.0.0.1:{server.server_port}"
                 with urllib.request.urlopen(base_url + "/healthz", timeout=2) as response:
                     health = json.load(response)
-                with urllib.request.urlopen(base_url + "/api/status", timeout=2) as response:
+                with urllib.request.urlopen(base_url + "/api/status?source=ydapi", timeout=2) as response:
                     status = json.load(response)
                 with urllib.request.urlopen(base_url + "/api/time-sync", timeout=2) as response:
                     time_sync = json.load(response)
@@ -174,6 +207,7 @@ class DashboardStatusTests(unittest.TestCase):
                 thread.join(timeout=2)
         self.assertEqual("ok", health["status"])
         self.assertEqual("IDLE", status["dashboard_status"])
+        self.assertEqual("ydapi", status["source_selection"]["requested"])
         self.assertEqual("UNAVAILABLE", time_sync["detection"]["status"])
 
 

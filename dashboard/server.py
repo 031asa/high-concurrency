@@ -11,7 +11,7 @@ from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional
-from urllib.parse import urlparse
+from urllib.parse import parse_qs, urlparse
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -286,12 +286,39 @@ def collect_time_sync_status(
     }
 
 
-def _latest_run(result_root: Path) -> Optional[Path]:
+def _run_directories(result_root: Path) -> List[Path]:
     try:
         candidates = [entry for entry in result_root.iterdir() if entry.is_dir()]
     except OSError:
-        return None
-    return max(candidates, key=lambda entry: entry.name) if candidates else None
+        return []
+    return sorted(candidates, key=lambda entry: entry.name, reverse=True)
+
+
+def _source_catalog(run_dirs: Iterable[Path]) -> List[Dict[str, Any]]:
+    catalog: List[Dict[str, Any]] = []
+    seen = set()
+    for run_dir in run_dirs:
+        meta = _parse_key_values(run_dir / "run.meta")
+        source = meta.get("source", "unknown")
+        if source in seen:
+            continue
+        seen.add(source)
+        catalog.append(
+            {
+                "value": source,
+                "label": source.upper(),
+                "latest_run_id": meta.get("run_id", run_dir.name),
+                "latest_started_at_utc": meta.get("started_at_utc", ""),
+            }
+        )
+    return catalog
+
+
+def _latest_run(run_dirs: Iterable[Path], source: Optional[str] = None) -> Optional[Path]:
+    for run_dir in run_dirs:
+        if source is None or _parse_key_values(run_dir / "run.meta").get("source", "unknown") == source:
+            return run_dir
+    return None
 
 
 def _consumer_payload(run_dir: Path, name: str) -> tuple[Dict[str, Any], List[Dict[str, Any]]]:
@@ -311,9 +338,12 @@ def _consumer_payload(run_dir: Path, name: str) -> tuple[Dict[str, Any], List[Di
     return current, rows
 
 
-def collect_status(result_root: Path) -> Dict[str, Any]:
+def collect_status(result_root: Path, source: Optional[str] = None) -> Dict[str, Any]:
     now_ms = int(time.time() * 1000)
-    run_dir = _latest_run(result_root)
+    requested_source = source or None
+    run_dirs = _run_directories(result_root)
+    available_sources = _source_catalog(run_dirs)
+    run_dir = _latest_run(run_dirs, requested_source)
     if run_dir is None:
         return {
             "dashboard_status": "IDLE",
@@ -321,7 +351,13 @@ def collect_status(result_root: Path) -> Dict[str, Any]:
             "run": None,
             "compute": {},
             "audit": {},
+            "market_observation": {},
             "series": [],
+            "source_selection": {
+                "requested": requested_source,
+                "selected": None,
+                "available": available_sources,
+            },
         }
 
     meta = _parse_key_values(run_dir / "run.meta")
@@ -374,6 +410,11 @@ def collect_status(result_root: Path) -> Dict[str, Any]:
         "audit": audit,
         "market_observation": market_observation,
         "series": series,
+        "source_selection": {
+            "requested": requested_source,
+            "selected": run["source"],
+            "available": available_sources,
+        },
     }
 
 
@@ -384,12 +425,14 @@ class DashboardHandler(BaseHTTPRequestHandler):
     index_file = INDEX_FILE
 
     def do_GET(self) -> None:  # noqa: N802 - stdlib API name
-        path = urlparse(self.path).path
+        request = urlparse(self.path)
+        path = request.path
         if path in {"/", "/index.html"}:
             self._send_bytes(HTTPStatus.OK, "text/html; charset=utf-8", self.index_file.read_bytes())
             return
         if path == "/api/status":
-            self._send_json(HTTPStatus.OK, collect_status(self.result_root))
+            source = parse_qs(request.query).get("source", [None])[0]
+            self._send_json(HTTPStatus.OK, collect_status(self.result_root, source=source))
             return
         if path == "/api/time-sync":
             self._send_json(

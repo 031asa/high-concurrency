@@ -121,8 +121,10 @@ conda activate ydtrader-high-concurrency
 bash scripts/run_dashboard.sh --port 8080
 ```
 
-浏览器打开 `http://127.0.0.1:8080`，再在另一个终端运行任一 Aeron 验收命令。页面会自动
-选取 `result/aeron-mvp/` 中最新的 run，并每秒刷新。服务默认只监听本机；确需供局域网查看时
+浏览器打开 `http://127.0.0.1:8080`，再在另一个终端运行任一 Aeron 验收命令。页面默认自动
+选取 `result/aeron-mvp/` 中最新的 run，也可以在“行情源”下拉框中固定查看某个 source 的最新
+run；选项从 `run.meta` 动态发现，新增 YDApi、CTP 等行情源无需修改 Dashboard。页面每秒刷新。
+服务默认只监听本机；确需供局域网查看时
 显式传入 `--host 0.0.0.0`，并由主机防火墙限制访问范围。
 
 Dashboard 只读取 Compute/Audit 已写出的 NDJSON 和 summary，不订阅发布流、不参与 Aeron
@@ -146,7 +148,8 @@ Dashboard 将系统对时和行情观测严格分为两个数据域：
   不等于授时偏差，也绝不参与对时判定；
 - OpenCTP 历史回放继续隐藏实时观测差，只保留吞吐、归档与完整性结果。
 
-授时检测接口为 `GET /api/time-sync`，行情运行接口仍为 `GET /api/status`。生成同期报告后直接
+授时检测接口为 `GET /api/time-sync`，行情运行接口仍为 `GET /api/status`；传入
+`GET /api/status?source=<source>` 可读取指定行情源的最新 run。生成同期报告或新增行情源后直接
 刷新页面即可，不需要重启 Dashboard。
 
 ## 易达 YDApi 实时行情
