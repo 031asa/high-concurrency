@@ -33,7 +33,7 @@ find "$SCRIPT_DIR/src" "$GENERATED_DIR" -type f -name '*.java' -print0 \
     | sort -z \
     | xargs -0 "$JAVA_HOME/bin/javac" \
         -encoding UTF-8 \
-        -cp "$AERON_JAR" \
+        -cp "$AERON_JAR:$JEROMQ_JAR" \
         -d "$CLASSES_DIR"
 
 printf 'AERON_MVP_BUILD result=SUCCESS project_root=%s classes=%s\n' \

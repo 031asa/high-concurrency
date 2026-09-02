@@ -11,6 +11,7 @@ fi
 AERON_MVP_JDK_DIR="$AERON_MVP_DEPS_DIR/jdk-17.0.19+10"
 AERON_MVP_AERON_JAR="$AERON_MVP_DEPS_DIR/aeron-all-1.51.0.jar"
 AERON_MVP_SBE_JAR="$AERON_MVP_DEPS_DIR/sbe-all-1.38.1.jar"
+AERON_MVP_JEROMQ_JAR="$AERON_MVP_DEPS_DIR/jeromq-0.6.0.jar"
 
 aeron_mvp_java_major() {
     local java_home=$1
@@ -91,14 +92,32 @@ aeron_mvp_resolve_sbe_jar() {
     return 1
 }
 
+aeron_mvp_resolve_jeromq_jar() {
+    local candidate
+    for candidate in \
+        "${JEROMQ_JAR:-}" \
+        "$AERON_MVP_DIR/lib/jeromq-0.6.0.jar" \
+        "$AERON_MVP_JEROMQ_JAR"; do
+        if [[ -n "$candidate" && -f "$candidate" ]]; then
+            JEROMQ_JAR=$candidate
+            export JEROMQ_JAR
+            return 0
+        fi
+    done
+    return 1
+}
+
 aeron_mvp_resolve_runtime_dependencies() {
-    aeron_mvp_detect_java_home 0 && aeron_mvp_resolve_aeron_jar
+    aeron_mvp_detect_java_home 0 \
+        && aeron_mvp_resolve_aeron_jar \
+        && aeron_mvp_resolve_jeromq_jar
 }
 
 aeron_mvp_resolve_build_dependencies() {
     aeron_mvp_detect_java_home 1 \
         && aeron_mvp_resolve_aeron_jar \
-        && aeron_mvp_resolve_sbe_jar
+        && aeron_mvp_resolve_sbe_jar \
+        && aeron_mvp_resolve_jeromq_jar
 }
 
 aeron_mvp_print_dependency_help() {

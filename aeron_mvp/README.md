@@ -34,6 +34,7 @@ schema、stream ID、Archive 和消费者。
 - JDK 17；
 - `aeron-all-1.51.0.jar`；
 - `sbe-all-1.38.1.jar`。
+- `jeromq-0.6.0.jar`（Leader ZMQ 接口）。
 
 脚本不依赖任何开发者的绝对路径，按以下顺序发现依赖：显式环境变量、发行包内置 runtime、
 当前 Conda/PATH 中的 JDK 17、项目本地 `result/aeron-mvp-deps/`。JAR 和生成物不会提交
@@ -74,6 +75,37 @@ bash scripts/run_aeron_mvp.sh --count 1000000 --sync-level 0
 AERON_MVP_ACCEPTANCE result=SUCCESS ...
 AERON_MVP_ACCEPTANCE live_compute=SUCCESS live_audit=SUCCESS replay_match=YES
 ```
+
+## 接入已编译的 Leader hpquant 模块
+
+接口位于 Aeron 原始行情 stream 的独立消费支路，而不是 Compute/Audit 结果层。Java 适配器
+订阅 SBE v3 原帧，以 ZMQ `PUSH` 发送两帧消息（`snapshot` topic + 原始 SBE bytes）；Leader
+侧 `hpquant.message.zmq_bus` 适配器使用 `PULL` 接收，完成 schema、字段和 sequence 校验后直接
+写入原 `md_queue`。Aeron 仍负责 IPC 与 Archive，ZMQ 只承担跨模块 TCP 边界。
+
+先验证不依赖 Leader 镜像的完整 live/replay 链路：
+
+```bash
+bash scripts/run_leader_zmq_smoke.sh 1000
+```
+
+接入 Leader 容器时，把 `aeron_mvp/leader_integration` 只读挂载到容器，并设置：
+
+```text
+PYTHONPATH=/opt/ydtrader-leader-integration:/opt/hpquant-market
+HPQUANT_MARKET_SOURCE=aeron-zmq
+HPQUANT_AERON_ZMQ_ENDPOINT=tcp://<high-concurrency-host>:7101
+```
+
+`sitecustomize.py` 仅在 `HPQUANT_MARKET_SOURCE=aeron-zmq` 时替换
+`hpquant.service.snapshot.run_tick_engine`；未设置时原数据源完全不变。镜像静态兼容性检查：
+
+```bash
+bash scripts/validate_hpquant_compiled_hook.sh hpquant-market:1.0.0
+```
+
+生产运行建议先启动 Leader `PULL` 端，再启动 Java live adapter；任何发送超时或 sequence 缺口
+都会使进程失败，使用 checkpoint 和 Archive 的显式 `--mode replay --resume` 恢复，禁止静默跳过。
 
 运行证据和持久化 recording 保存在 `result/aeron-mvp/<run-id>/`。源码树中的 Java/SBE
 文件比现有 class 新时，验收脚本会自动重编译，避免 `git pull` 后继续运行旧 class。
@@ -196,6 +228,6 @@ OpenCTP 7x24 环境可能重放历史交易日，因此其 market timestamp 适�
 bash aeron_mvp/build_release.sh
 ```
 
-生成 `result/ydtrader-aeron-mvp-java-0.6.1-linux-x86_64.tar.gz`，包含精简 Java 17
+生成 `result/ydtrader-aeron-mvp-java-0.7.0-linux-x86_64.tar.gz`，包含精简 Java 17
 运行时、Aeron runtime 和 Dashboard 静态资源；核心验收无需预装 Java或联网下载依赖，
 Dashboard 和 Python bridge 需目标机安装 Miniconda，并按包内 `environment.yml` 创建环境。

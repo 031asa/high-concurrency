@@ -3,7 +3,7 @@ set -euo pipefail
 
 SCRIPT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
 PROJECT_ROOT=$(cd -- "$SCRIPT_DIR/.." && pwd)
-VERSION=0.6.1
+VERSION=0.7.0
 PLATFORM=linux-x86_64
 DIST_NAME="ydtrader-aeron-mvp-java-${VERSION}-${PLATFORM}"
 RESULT_DIR="$PROJECT_ROOT/result"
@@ -41,6 +41,7 @@ STAGE_ROOT=$(mktemp -d -p "$RESULT_DIR" .aeron-java-release-XXXXXX)
 STAGE_DIST="$STAGE_ROOT/$DIST_NAME"
 mkdir -p \
     "$STAGE_DIST/aeron_mvp/build" \
+    "$STAGE_DIST/aeron_mvp/leader_integration" \
     "$STAGE_DIST/aeron_mvp/lib" \
     "$STAGE_DIST/aeron_mvp/schema" \
     "$STAGE_DIST/config" \
@@ -56,13 +57,24 @@ cp -a "$SCRIPT_DIR/run_java.sh" "$STAGE_DIST/aeron_mvp/run_java.sh"
 cp -a "$SCRIPT_DIR/env.sh" "$STAGE_DIST/aeron_mvp/env.sh"
 cp -a "$SCRIPT_DIR/ctp_bridge.py" "$STAGE_DIST/aeron_mvp/ctp_bridge.py"
 cp -a "$SCRIPT_DIR/ydapi_bridge.py" "$STAGE_DIST/aeron_mvp/ydapi_bridge.py"
+cp -a \
+    "$SCRIPT_DIR/leader_integration/hpquant_aeron_source.py" \
+    "$SCRIPT_DIR/leader_integration/sitecustomize.py" \
+    "$SCRIPT_DIR/leader_integration/zmq_probe.py" \
+    "$SCRIPT_DIR/leader_integration/validate_compiled_hook.py" \
+    "$STAGE_DIST/aeron_mvp/leader_integration/"
 cp -a "$SCRIPT_DIR/schema/market-data.xml" "$STAGE_DIST/aeron_mvp/schema/market-data.xml"
 cp -a "$AERON_JAR" "$STAGE_DIST/aeron_mvp/lib/aeron-all-1.51.0.jar"
+cp -a "$JEROMQ_JAR" "$STAGE_DIST/aeron_mvp/lib/jeromq-0.6.0.jar"
 cp -a "$PROJECT_ROOT/scripts/run_aeron_mvp.sh" "$STAGE_DIST/scripts/run_aeron_mvp.sh"
 cp -a "$PROJECT_ROOT/scripts/run_ctp_aeron_mvp.sh" "$STAGE_DIST/scripts/run_ctp_aeron_mvp.sh"
 cp -a "$PROJECT_ROOT/scripts/run_ctp_live_aeron_mvp.sh" "$STAGE_DIST/scripts/run_ctp_live_aeron_mvp.sh"
 cp -a "$PROJECT_ROOT/scripts/run_ydapi_aeron_mvp.sh" "$STAGE_DIST/scripts/run_ydapi_aeron_mvp.sh"
 cp -a "$PROJECT_ROOT/scripts/run_dashboard.sh" "$STAGE_DIST/scripts/run_dashboard.sh"
+cp -a "$PROJECT_ROOT/scripts/run_leader_zmq_smoke.sh" \
+    "$STAGE_DIST/scripts/run_leader_zmq_smoke.sh"
+cp -a "$PROJECT_ROOT/scripts/validate_hpquant_compiled_hook.sh" \
+    "$STAGE_DIST/scripts/validate_hpquant_compiled_hook.sh"
 cp -a "$PROJECT_ROOT/scripts/bootstrap_ctp_tts.sh" "$STAGE_DIST/scripts/bootstrap_ctp_tts.sh"
 cp -a "$PROJECT_ROOT/scripts/bootstrap_ctp_live.sh" "$STAGE_DIST/scripts/bootstrap_ctp_live.sh"
 cp -a "$PROJECT_ROOT/utils/conda_runtime.sh" "$STAGE_DIST/utils/conda_runtime.sh"
@@ -72,6 +84,8 @@ cp -a "$PROJECT_ROOT/vendor/wheels/pyyd-1.486.96.99-cp39-cp39-linux_x86_64.whl" 
     "$STAGE_DIST/vendor/wheels/"
 cp -a "$SCRIPT_DIR/PACKAGE_README.md" "$STAGE_DIST/README.md"
 cp -a "$SCRIPT_DIR/THIRD_PARTY_NOTICES.md" "$STAGE_DIST/THIRD_PARTY_NOTICES.md"
+cp -a "$SCRIPT_DIR/licenses/JEROMQ-LICENSE.txt" \
+    "$STAGE_DIST/licenses/JEROMQ-LICENSE.txt"
 printf '%s\n' "$VERSION" >"$STAGE_DIST/VERSION"
 
 "$JAVA_HOME/bin/jlink" \
@@ -92,11 +106,15 @@ chmod 0755 \
     "$STAGE_DIST/aeron_mvp/env.sh" \
     "$STAGE_DIST/aeron_mvp/ctp_bridge.py" \
     "$STAGE_DIST/aeron_mvp/ydapi_bridge.py" \
+    "$STAGE_DIST/aeron_mvp/leader_integration/zmq_probe.py" \
+    "$STAGE_DIST/aeron_mvp/leader_integration/validate_compiled_hook.py" \
     "$STAGE_DIST/scripts/run_aeron_mvp.sh" \
     "$STAGE_DIST/scripts/run_ctp_aeron_mvp.sh" \
     "$STAGE_DIST/scripts/run_ctp_live_aeron_mvp.sh" \
     "$STAGE_DIST/scripts/run_ydapi_aeron_mvp.sh" \
     "$STAGE_DIST/scripts/run_dashboard.sh" \
+    "$STAGE_DIST/scripts/run_leader_zmq_smoke.sh" \
+    "$STAGE_DIST/scripts/validate_hpquant_compiled_hook.sh" \
     "$STAGE_DIST/scripts/bootstrap_ctp_tts.sh" \
     "$STAGE_DIST/scripts/bootstrap_ctp_live.sh" \
     "$STAGE_DIST/utils/conda_runtime.sh" \

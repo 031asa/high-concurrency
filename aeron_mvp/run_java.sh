@@ -13,8 +13,14 @@ if ! aeron_mvp_resolve_runtime_dependencies; then
     exit 2
 fi
 
+main_class=com.ydtrader.mvp.AeronMvp
+if [[ "${1:-}" == leader-zmq ]]; then
+    main_class=com.ydtrader.mvp.LeaderZmqAdapter
+    shift
+fi
+
 exec "$JAVA_HOME/bin/java" \
     --add-opens java.base/jdk.internal.misc=ALL-UNNAMED \
     --add-opens java.base/java.util.zip=ALL-UNNAMED \
-    -cp "$SCRIPT_DIR/build/classes:$AERON_JAR" \
-    com.ydtrader.mvp.AeronMvp "$@"
+    -cp "$SCRIPT_DIR/build/classes:$AERON_JAR:$JEROMQ_JAR" \
+    "$main_class" "$@"

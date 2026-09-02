@@ -9,9 +9,11 @@ JDK_ARCHIVE="$AERON_MVP_DEPS_DIR/temurin-17.0.19+10.tar.gz"
 JDK_URL='https://github.com/adoptium/temurin17-binaries/releases/download/jdk-17.0.19%2B10/OpenJDK17U-jdk_x64_linux_hotspot_17.0.19_10.tar.gz'
 AERON_URL='https://repo.maven.apache.org/maven2/io/aeron/aeron-all/1.51.0/aeron-all-1.51.0.jar'
 SBE_URL='https://repo.maven.apache.org/maven2/uk/co/real-logic/sbe-all/1.38.1/sbe-all-1.38.1.jar'
+JEROMQ_URL='https://repo.maven.apache.org/maven2/org/zeromq/jeromq/0.6.0/jeromq-0.6.0.jar'
 JDK_SHA256='d8afc263758141a66e0e3aafc321e783f7016696f4eaea067d340a269037d331'
 AERON_SHA1='4d17308cba9d4ff3ff97833d6dac52e3289f81e1'
 SBE_SHA1='ef7dd43a54a0269854ac2a296c2f6ba25edbaeff'
+JEROMQ_SHA1='95a6e9e71ef50f5cb023fe01dad748c3174ad7eb'
 
 for required in curl tar sha256sum sha1sum; do
     command -v "$required" >/dev/null || {
@@ -45,6 +47,7 @@ download_and_verify() {
 
 download_and_verify "$AERON_URL" "$AERON_MVP_AERON_JAR" "$AERON_SHA1" sha1sum
 download_and_verify "$SBE_URL" "$AERON_MVP_SBE_JAR" "$SBE_SHA1" sha1sum
+download_and_verify "$JEROMQ_URL" "$AERON_MVP_JEROMQ_JAR" "$JEROMQ_SHA1" sha1sum
 
 if ! aeron_mvp_detect_java_home 1; then
     download_and_verify "$JDK_URL" "$JDK_ARCHIVE" "$JDK_SHA256" sha256sum
