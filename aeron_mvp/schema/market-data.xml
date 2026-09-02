@@ -3,8 +3,8 @@
     xmlns:sbe="http://fixprotocol.io/2016/sbe"
     package="com.ydtrader.mvp.codec"
     id="701"
-    version="2"
-    semanticVersion="2.0.0"
+    version="3"
+    semanticVersion="3.0.0"
     description="YDTrader Aeron market-data MVP"
     byteOrder="littleEndian">
   <types>
@@ -53,9 +53,30 @@
     <field name="askPrice5" id="24" type="double"/>
     <field name="bidVolume5" id="25" type="int64"/>
     <field name="askVolume5" id="26" type="int64"/>
+    <field name="volume" id="31" type="int64" sinceVersion="3"/>
+    <field name="turnover" id="32" type="double" sinceVersion="3"/>
+    <field name="openInterest" id="33" type="double" sinceVersion="3"/>
+    <field name="preSettlementPrice" id="34" type="double" sinceVersion="3"/>
+    <field name="preClosePrice" id="35" type="double" sinceVersion="3"/>
+    <field name="preOpenInterest" id="36" type="double" sinceVersion="3"/>
+    <field name="openPrice" id="37" type="double" sinceVersion="3"/>
+    <field name="highestPrice" id="38" type="double" sinceVersion="3"/>
+    <field name="lowestPrice" id="39" type="double" sinceVersion="3"/>
+    <field name="closePrice" id="40" type="double" sinceVersion="3"/>
+    <field name="settlementPrice" id="41" type="double" sinceVersion="3"/>
+    <field name="upperLimitPrice" id="42" type="double" sinceVersion="3"/>
+    <field name="lowerLimitPrice" id="43" type="double" sinceVersion="3"/>
+    <field name="preDelta" id="44" type="double" sinceVersion="3"/>
+    <field name="currDelta" id="45" type="double" sinceVersion="3"/>
+    <field name="averagePrice" id="46" type="double" sinceVersion="3"/>
+    <field name="updateMillisec" id="47" type="uint16" sinceVersion="3"/>
     <data name="sessionId" id="27" type="varStringEncoding"/>
     <data name="instrument" id="28" type="varStringEncoding"/>
     <data name="tradingDay" id="29" type="varStringEncoding"/>
     <data name="marketTimestampRaw" id="30" type="varStringEncoding"/>
+    <data name="exchangeId" id="48" type="varStringEncoding" sinceVersion="3"/>
+    <data name="actionDay" id="49" type="varStringEncoding" sinceVersion="3"/>
+    <data name="updateTime" id="50" type="varStringEncoding" sinceVersion="3"/>
+    <data name="source" id="51" type="varStringEncoding" sinceVersion="3"/>
   </sbe:message>
 </sbe:messageSchema>

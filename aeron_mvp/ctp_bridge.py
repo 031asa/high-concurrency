@@ -16,9 +16,12 @@ from pathlib import Path
 from openctp_ctp import thostmduserapi as mdapi
 
 
-PACKET = struct.Struct("!IHHIQQQd" + "ddqq" * 5 + "32s16s32s")
+PACKET_V2 = struct.Struct("!IHHIQQQd" + "ddqq" * 5 + "32s16s32s")
+PACKET = struct.Struct(
+    "!IHHIQQQd" + "ddqq" * 5 + "q" + "d" * 15 + "H32s16s32s16s16s16s"
+)
 MAGIC = 0x43545031
-VERSION = 2
+VERSION = 3
 TIMESTAMP_VALID = 1
 DEPTH_LEVELS = 5
 CHINA_TZ = timezone(timedelta(hours=8))
@@ -137,7 +140,10 @@ class CtpMarketBridge(mdapi.CThostFtdcMdSpi):
         self.sequence += 1
         self.last_tick_monotonic = time.monotonic()
         instrument = getattr(tick, "InstrumentID", "")
+        exchange_id = getattr(tick, "ExchangeID", "")
         trading_day = getattr(tick, "TradingDay", "")
+        action_day = getattr(tick, "ActionDay", "")
+        update_time = getattr(tick, "UpdateTime", "")
         packet = PACKET.pack(
             MAGIC,
             VERSION,
@@ -157,9 +163,29 @@ class CtpMarketBridge(mdapi.CThostFtdcMdSpi):
                     nonnegative_integer(getattr(tick, f"AskVolume{level}", 0)),
                 )
             ),
+            nonnegative_integer(getattr(tick, "Volume", 0)),
+            finite_number(getattr(tick, "Turnover", 0.0)),
+            finite_number(getattr(tick, "OpenInterest", 0.0)),
+            finite_number(getattr(tick, "PreSettlementPrice", 0.0)),
+            finite_number(getattr(tick, "PreClosePrice", 0.0)),
+            finite_number(getattr(tick, "PreOpenInterest", 0.0)),
+            finite_number(getattr(tick, "OpenPrice", 0.0)),
+            finite_number(getattr(tick, "HighestPrice", 0.0)),
+            finite_number(getattr(tick, "LowestPrice", 0.0)),
+            finite_number(getattr(tick, "ClosePrice", 0.0)),
+            finite_number(getattr(tick, "SettlementPrice", 0.0)),
+            finite_number(getattr(tick, "UpperLimitPrice", 0.0)),
+            finite_number(getattr(tick, "LowerLimitPrice", 0.0)),
+            finite_number(getattr(tick, "PreDelta", 0.0)),
+            finite_number(getattr(tick, "CurrDelta", 0.0)),
+            finite_number(getattr(tick, "AveragePrice", 0.0)),
+            min(999, nonnegative_integer(getattr(tick, "UpdateMillisec", 0))),
             fixed_utf8(instrument, 32),
             fixed_utf8(trading_day, 16),
             fixed_utf8(market_raw, 32),
+            fixed_utf8(exchange_id, 16),
+            fixed_utf8(action_day, 16),
+            fixed_utf8(update_time, 16),
         )
         self.socket.sendto(packet, self.destination)
         if self.sequence == 1 or self.sequence % 100 == 0:
