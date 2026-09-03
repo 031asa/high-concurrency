@@ -62,7 +62,15 @@ bash scripts/run_zmq_market_smoke.sh 1000
 ```
 
 该命令同时验证实时订阅和 Archive replay，成功时输出 `live_replay_match=YES`。
-正式出口使用 `bash aeron_mvp/run_java.sh zmq-egress ...`，默认端口为 TCP 7101。
+正式运行时先启动下游 `PULL`，再在多行情源命令中启用出口：
+
+```bash
+bash scripts/run_multi_source_aeron_mvp.sh \
+  --source-config config/market-sources/ydapi.json config/market-sources/ctp-live.json \
+  --zmq-endpoint tcp://0.0.0.0:7101
+```
+
+主脚本负责复用同一个动态 Aeron 目录；不要使用 `sudo` 或另写固定的 `/dev/shm` 目录。
 
 ## 实时 Dashboard（可选）
 

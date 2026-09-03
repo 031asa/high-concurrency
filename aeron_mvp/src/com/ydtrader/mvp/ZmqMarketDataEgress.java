@@ -83,6 +83,7 @@ public final class ZmqMarketDataEgress
         final int checkpointInterval = options.integer(
             "checkpoint-interval", 1_000, 1, Integer.MAX_VALUE);
         final Path checkpointFile = options.optionalPath("checkpoint-file");
+        final Path readyFile = options.optionalPath("ready-file");
 
         try (ZContext context = new ZContext())
         {
@@ -106,7 +107,7 @@ public final class ZmqMarketDataEgress
             System.out.flush();
             if ("live".equals(mode))
             {
-                runLive(aeronDir, expectedCount, timeoutSeconds, forwarder);
+                runLive(aeronDir, expectedCount, timeoutSeconds, readyFile, forwarder);
             }
             else
             {
@@ -128,11 +129,14 @@ public final class ZmqMarketDataEgress
         final String aeronDir,
         final long expectedCount,
         final long timeoutSeconds,
-        final Forwarder forwarder)
+        final Path readyFile,
+        final Forwarder forwarder) throws IOException
     {
         try (Aeron aeron = Aeron.connect(new Aeron.Context().aeronDirectoryName(aeronDir));
             Subscription subscription = aeron.addSubscription(RAW_CHANNEL, RAW_STREAM_ID))
         {
+            awaitSubscriptionConnected(subscription, Duration.ofSeconds(timeoutSeconds));
+            writeReadyFile(readyFile);
             pollUntilComplete(subscription, expectedCount, timeoutSeconds, forwarder);
         }
     }
@@ -211,6 +215,36 @@ public final class ZmqMarketDataEgress
         }
     }
 
+    private static void awaitSubscriptionConnected(
+        final Subscription subscription,
+        final Duration timeout)
+    {
+        final long deadlineNs = System.nanoTime() + timeout.toNanos();
+        while (!subscription.isConnected())
+        {
+            if (System.nanoTime() >= deadlineNs)
+            {
+                throw new IllegalStateException("Aeron market-data subscription did not connect");
+            }
+            Thread.onSpinWait();
+        }
+    }
+
+    private static void writeReadyFile(final Path readyFile) throws IOException
+    {
+        if (readyFile == null)
+        {
+            return;
+        }
+        final Path absolute = readyFile.toAbsolutePath();
+        final Path parent = absolute.getParent();
+        if (parent != null)
+        {
+            Files.createDirectories(parent);
+        }
+        Files.writeString(absolute, "READY\n", StandardCharsets.UTF_8);
+    }
+
     private static long readCheckpointPosition(final Path path, final long recordingId)
         throws IOException
     {
@@ -246,7 +280,7 @@ public final class ZmqMarketDataEgress
     {
         System.out.println(
             "zmq-egress --mode live|replay --aeron-dir DIR [--recording-id ID] " +
-                "[--endpoint tcp://127.0.0.1:7101] [--expected-count N] " +
+                "[--endpoint tcp://127.0.0.1:7101] [--expected-count N] [--ready-file FILE] " +
                 "[--checkpoint-file FILE] [--resume]");
     }
 

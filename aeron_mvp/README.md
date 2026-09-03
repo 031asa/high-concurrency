@@ -129,18 +129,22 @@ TCP 边界；下游项目自行实现 `PULL`、协议解码和队列适配。
 bash scripts/run_zmq_market_smoke.sh 1000
 ```
 
-正式运行出口：
+正式运行时先启动下游 `PULL`，再由多行情源主脚本同时编排 Media Driver 与 ZMQ 出口：
 
 ```bash
-bash aeron_mvp/run_java.sh zmq-egress \
-  --mode live \
-  --aeron-dir /dev/shm/ydtrader-aeron \
-  --endpoint tcp://0.0.0.0:7101
+bash scripts/run_multi_source_aeron_mvp.sh \
+  --source-config \
+    config/market-sources/ydapi.json \
+    config/market-sources/ctp-live.example.json \
+  --zmq-endpoint tcp://0.0.0.0:7101 \
+  --count 1000000
 ```
 
 下游只需连接 `tcp://<high-concurrency-host>:7101`。高并发包不包含下游业务包、Python
 monkey patch、`sitecustomize` 或下游队列实现。任何发送超时或 sequence 缺口都会使进程失败；
 使用 checkpoint 和 Archive 的显式 `--mode replay --resume` 恢复，禁止静默跳过。
+`zmq-egress` 是 Aeron 客户端，不能脱离主脚本单独启动；主脚本会把本次运行实际使用的动态
+Aeron 目录传给它，不需要 `sudo`，也不得另写一个固定的 `/dev/shm` 目录。
 
 ### 输入与输出边界
 

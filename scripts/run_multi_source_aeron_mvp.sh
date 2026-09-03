@@ -14,6 +14,7 @@ count=100000
 sync_level=0
 base_udp_port=$((24000 + ($$ % 10000)))
 source_timeout=60
+zmq_endpoint=
 synthetic_repeat=1000
 ctp_front=tcp://trading.openctp.cn:30011
 ctp_api_kind=tts
@@ -47,6 +48,7 @@ while [[ $# -gt 0 ]]; do
         --sync-level) sync_level=$2; shift 2 ;;
         --base-udp-port) base_udp_port=$2; shift 2 ;;
         --source-timeout-seconds) source_timeout=$2; legacy_source_option_used=1; shift 2 ;;
+        --zmq-endpoint) zmq_endpoint=$2; shift 2 ;;
         --synthetic-repeat) synthetic_repeat=$2; legacy_source_option_used=1; shift 2 ;;
         --ctp-front) ctp_front=$2; legacy_source_option_used=1; shift 2 ;;
         --ctp-api-kind) ctp_api_kind=$2; legacy_source_option_used=1; shift 2 ;;
@@ -84,6 +86,10 @@ case "$ydapi_repeat" in ''|*[!0-9]*) printf -- '--ydapi-repeat must be a positiv
     printf -- '--ctp-latency-mode must be historical_replay or live\n' >&2
     exit 64
 }
+if [[ -n "$zmq_endpoint" && "$zmq_endpoint" != tcp://* ]]; then
+    printf -- '--zmq-endpoint must use tcp://\n' >&2
+    exit 64
+fi
 
 if [[ "${#source_config_files[@]}" -gt 0 && "$legacy_source_option_used" -eq 1 ]]; then
     printf -- '--source-config cannot be combined with legacy source-specific options\n' >&2
@@ -293,6 +299,7 @@ control_dir="$run_dir/control"
 aeron_dir="/dev/shm/ydtrader-aeron-multi-${UID}-$$"
 ready_file="$control_dir/server.ready"
 mux_ready_file="$control_dir/mux.ready"
+egress_ready_file="$control_dir/zmq-egress.ready"
 recording_file="$control_dir/recording.id"
 total_count=$((count * ${#source_names[@]}))
 source_csv=$(IFS=,; printf '%s' "${source_names[*]}")
@@ -318,15 +325,16 @@ publisher_pid=
 mux_pid=
 compute_pid=
 audit_pid=
+egress_pid=
 declare -a bridge_pids=()
 
 mkdir -p "$archive_dir" "$control_dir"
 write_run_metadata() {
     local temporary="$run_dir/run.meta.tmp"
     {
-        printf 'run_id=%s\nsource=multi\nsources=%s\nsource_config_mode=%s\nlatency_mode=%s\nexpected_count=%s\ncount_per_source=%s\nsync_level=%s\nstarted_at_utc=%s\nstatus=%s\nrecording_id=%s\n' \
+        printf 'run_id=%s\nsource=multi\nsources=%s\nsource_config_mode=%s\nlatency_mode=%s\nexpected_count=%s\ncount_per_source=%s\nsync_level=%s\nstarted_at_utc=%s\nstatus=%s\nrecording_id=%s\nzmq_endpoint=%s\n' \
             "$run_id" "$source_csv" "$source_config_mode" "$latency_mode" "$total_count" "$count" "$sync_level" \
-            "$run_started_at_utc" "$run_status" "${recording_id:-}"
+            "$run_started_at_utc" "$run_status" "${recording_id:-}" "$zmq_endpoint"
         for index in "${!source_names[@]}"; do
             printf 'source_kind.%s=%s\n' "${source_names[$index]}" "${source_kinds[$index]}"
             printf 'source_latency_mode.%s=%s\n' "${source_names[$index]}" "${source_latency_modes[$index]}"
@@ -349,6 +357,7 @@ stop_if_running() {
 cleanup() {
     for process_id in "${bridge_pids[@]:-}"; do stop_if_running "$process_id"; done
     stop_if_running "$mux_pid"
+    stop_if_running "$egress_pid"
     stop_if_running "$audit_pid"
     stop_if_running "$compute_pid"
     stop_if_running "$publisher_pid"
@@ -422,6 +431,24 @@ compute_pid=$!
     --progress-file "$run_dir/audit-live.ndjson" --progress-interval-ms 250 \
     >"$run_dir/audit-live.log" 2>&1 &
 audit_pid=$!
+if [[ -n "$zmq_endpoint" ]]; then
+    "${RUN_JAVA[@]}" zmq-egress \
+        --mode live --aeron-dir "$aeron_dir" --endpoint "$zmq_endpoint" \
+        --expected-count "$total_count" --timeout-seconds "$source_timeout" \
+        --ready-file "$egress_ready_file" \
+        --checkpoint-file "$control_dir/zmq-egress.checkpoint" \
+        >"$run_dir/zmq-egress.log" 2>&1 &
+    egress_pid=$!
+    for _ in $(seq 1 200); do
+        [[ -f "$egress_ready_file" ]] && break
+        kill -0 "$egress_pid" 2>/dev/null || {
+            sed -n '1,200p' "$run_dir/zmq-egress.log" >&2
+            exit 1
+        }
+        sleep 0.05
+    done
+    [[ -f "$egress_ready_file" ]] || { printf 'ZMQ egress readiness timed out\n' >&2; exit 1; }
+fi
 
 for index in "${!source_names[@]}"; do
     kind=${source_kinds[$index]}
@@ -469,6 +496,10 @@ for process_id in "${bridge_pids[@]}"; do stop_if_running "$process_id"; done
 bridge_pids=()
 wait "$compute_pid"; compute_pid=
 wait "$audit_pid"; audit_pid=
+if [[ -n "$egress_pid" ]]; then
+    wait "$egress_pid"
+    egress_pid=
+fi
 
 "${RUN_JAVA[@]}" compute \
     --aeron-dir "$aeron_dir" --recording-id "$recording_id" \

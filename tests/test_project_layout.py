@@ -71,3 +71,14 @@ def test_release_build_and_installer_need_no_keys_or_activation():
     for value in forbidden:
         assert value not in build
         assert value not in installer
+
+
+def test_multi_source_launcher_owns_optional_zmq_egress_lifecycle():
+    launcher = (PROJECT_ROOT / "scripts" / "run_multi_source_aeron_mvp.sh").read_text(
+        encoding="utf-8"
+    )
+
+    assert "--zmq-endpoint" in launcher
+    assert 'zmq-egress \\\n' in launcher
+    assert '--aeron-dir "$aeron_dir"' in launcher
+    assert 'stop_if_running "$egress_pid"' in launcher
