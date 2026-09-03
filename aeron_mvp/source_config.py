@@ -145,6 +145,7 @@ def load_source_config(path: Path, project_root: Path) -> dict[str, str]:
     normalized.update(
         name=name,
         kind=kind,
+        latency_mode="live",
         repeat=str(_integer(document.get("repeat", 1), "repeat", source, 1, 1_000_000)),
         source_timeout_seconds=str(
             _integer(

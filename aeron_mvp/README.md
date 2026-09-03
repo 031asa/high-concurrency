@@ -107,7 +107,10 @@ bash scripts/run_multi_source_aeron_mvp.sh \
 UDP 端口和独立输入 sequence；轻量 mux 校验每个源没有缺口后，为合并流分配全局 sequence，
 再送入原有单一 Aeron publication、Archive recording、Compute/Audit 和 ZMQ 出口。任一源断流、
 缺包或提前退出都会让整次运行失败，不会静默降级。Dashboard 的行情源列表会显示该次运行连接的
-全部来源，进度快照同时包含 `latency_by_source`。
+全部来源，严格保持 Bash 配置顺序；下拉名称来自每份配置的 `name`，不提供 `MULTI` 或历史运行
+选项。进度快照同时保留兼容字段 `latency_by_source`，并新增 `source_views`，分别保存每个来源的
+最新行情、五档盘口、总体延迟、分时延迟和分合约延迟。切换来源只切换这些来源级数据，吞吐、
+总接收数、Recording、Archive、Compute/Audit 状态仍属于整次运行。
 
 旧的 `--sources <类型>[:来源名],...` 及共享的 `--ctp-*`/`--ydapi-*` 参数继续保留，供既有
 命令兼容使用；它们不能与 `--source-config` 混用。新部署应始终使用逐源配置模式。

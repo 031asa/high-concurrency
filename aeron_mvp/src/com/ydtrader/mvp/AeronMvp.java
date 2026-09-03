@@ -1158,6 +1158,78 @@ public final class AeronMvp
         AUDIT
     }
 
+    private static final class QuoteSnapshot
+    {
+        private long sequence;
+        private String source = "";
+        private String instrument = "";
+        private String tradingDay = "";
+        private String marketTimestampRaw = "";
+        private double lastPrice;
+        private int depthLevels = 1;
+        private final double[] bidPrices = new double[MAX_DEPTH_LEVELS];
+        private final double[] askPrices = new double[MAX_DEPTH_LEVELS];
+        private final long[] bidVolumes = new long[MAX_DEPTH_LEVELS];
+        private final long[] askVolumes = new long[MAX_DEPTH_LEVELS];
+
+        private void capture(
+            final long quoteSequence,
+            final String quoteSource,
+            final String quoteInstrument,
+            final String quoteTradingDay,
+            final String quoteMarketTimestampRaw,
+            final double quoteLastPrice,
+            final int quoteDepthLevels,
+            final double[] quoteBidPrices,
+            final double[] quoteAskPrices,
+            final long[] quoteBidVolumes,
+            final long[] quoteAskVolumes)
+        {
+            sequence = quoteSequence;
+            source = quoteSource;
+            instrument = quoteInstrument;
+            tradingDay = quoteTradingDay;
+            marketTimestampRaw = quoteMarketTimestampRaw;
+            lastPrice = quoteLastPrice;
+            depthLevels = quoteDepthLevels;
+            System.arraycopy(quoteBidPrices, 0, bidPrices, 0, MAX_DEPTH_LEVELS);
+            System.arraycopy(quoteAskPrices, 0, askPrices, 0, MAX_DEPTH_LEVELS);
+            System.arraycopy(quoteBidVolumes, 0, bidVolumes, 0, MAX_DEPTH_LEVELS);
+            System.arraycopy(quoteAskVolumes, 0, askVolumes, 0, MAX_DEPTH_LEVELS);
+        }
+
+        private void appendJson(final StringBuilder json)
+        {
+            json.append("{\"sequence\":").append(sequence)
+                .append(",\"source\":\"").append(jsonEscape(source))
+                .append("\",\"instrument\":\"").append(jsonEscape(instrument))
+                .append("\",\"trading_day\":\"").append(jsonEscape(tradingDay))
+                .append("\",\"market_time\":\"").append(jsonEscape(marketTimestampRaw))
+                .append(String.format(Locale.ROOT, "\",\"last_price\":%.10f", lastPrice))
+                .append(",\"depth_levels\":").append(depthLevels)
+                .append(",\"depth\":[");
+            for (int level = 0; level < MAX_DEPTH_LEVELS; level++)
+            {
+                if (level > 0)
+                {
+                    json.append(',');
+                }
+                json.append("{\"level\":").append(level + 1)
+                    .append(",\"bid_price\":").append(ConsumerState.nullablePrice(bidPrices[level]))
+                    .append(",\"bid_volume\":").append(ConsumerState.nullableVolume(bidVolumes[level]))
+                    .append(",\"ask_price\":").append(ConsumerState.nullablePrice(askPrices[level]))
+                    .append(",\"ask_volume\":").append(ConsumerState.nullableVolume(askVolumes[level]))
+                    .append('}');
+            }
+            json.append("]")
+                .append(",\"bid_price\":").append(ConsumerState.nullablePrice(bidPrices[0]))
+                .append(",\"bid_volume\":").append(ConsumerState.nullableVolume(bidVolumes[0]))
+                .append(",\"ask_price\":").append(ConsumerState.nullablePrice(askPrices[0]))
+                .append(",\"ask_volume\":").append(ConsumerState.nullableVolume(askVolumes[0]))
+                .append('}');
+        }
+    }
+
     private static final class ConsumerState
     {
         private final int expectedCount;
@@ -1169,6 +1241,9 @@ public final class AeronMvp
         private final Map<Long, LatencyDistribution> latencyByTimeBin = new HashMap<>();
         private final Map<String, LatencyDistribution> latencyByInstrument = new HashMap<>();
         private final Map<String, LatencyDistribution> latencyBySource = new HashMap<>();
+        private final Map<String, QuoteSnapshot> latestQuoteBySource = new HashMap<>();
+        private final Map<String, Map<Long, LatencyDistribution>> latencyBySourceTimeBin = new HashMap<>();
+        private final Map<String, Map<String, LatencyDistribution>> latencyBySourceInstrument = new HashMap<>();
         private long received;
         private long expectedSequence = 1;
         private long gaps;
@@ -1258,6 +1333,19 @@ public final class AeronMvp
             quoteDecoder.actionDay();
             quoteDecoder.updateTime();
             lastSource = quoteDecoder.source();
+            final String quoteSource = lastSource.isEmpty() ? "unknown" : lastSource;
+            latestQuoteBySource.computeIfAbsent(quoteSource, key -> new QuoteSnapshot()).capture(
+                lastQuoteSequence,
+                quoteSource,
+                lastInstrument,
+                lastTradingDay,
+                lastMarketTimestampRaw,
+                lastPrice,
+                lastDepthLevels,
+                lastBidPrices,
+                lastAskPrices,
+                lastBidVolumes,
+                lastAskVolumes);
             hasQuote = true;
 
             if (mode == ConsumerMode.COMPUTE)
@@ -1289,7 +1377,12 @@ public final class AeronMvp
                 latencyByInstrument.computeIfAbsent(instrument, key -> new LatencyDistribution())
                     .record(latencyMs);
                 final String source = lastSource.isEmpty() ? "unknown" : lastSource;
-                latencyBySource.computeIfAbsent(source, key -> new LatencyDistribution())
+                latencyBySource.computeIfAbsent(source, key -> new LatencyDistribution()).record(latencyMs);
+                latencyBySourceTimeBin.computeIfAbsent(source, key -> new HashMap<>())
+                    .computeIfAbsent(timeBin, key -> new LatencyDistribution())
+                    .record(latencyMs);
+                latencyBySourceInstrument.computeIfAbsent(source, key -> new HashMap<>())
+                    .computeIfAbsent(instrument, key -> new LatencyDistribution())
                     .record(latencyMs);
             }
 
@@ -1361,6 +1454,7 @@ public final class AeronMvp
             final String latencyTimeBins = serializeTimeBinStats();
             final String latencyContracts = serializeContractStats();
             final String latencySources = serializeSourceStats();
+            final String sourceViews = serializeSourceViews();
             final String quote = hasQuote ? String.format(
                 Locale.ROOT,
                 "{\"sequence\":%d,\"source\":\"%s\",\"instrument\":\"%s\",\"trading_day\":\"%s\"," +
@@ -1389,7 +1483,7 @@ public final class AeronMvp
                     "\"mean_ms\":%.6f,\"std_ms\":%.6f,\"p95_ms\":null," +
                     "\"max_ms\":%.6f,\"latency_by_time\":%s," +
                     "\"latency_by_contract\":%s,\"latency_by_source\":%s," +
-                    "\"elapsed_seconds\":%.6f," +
+                    "\"source_views\":%s,\"elapsed_seconds\":%.6f," +
                     "\"rate_per_second\":%.3f}%n",
                 System.currentTimeMillis(),
                 mode,
@@ -1409,13 +1503,19 @@ public final class AeronMvp
                 latencyTimeBins,
                 latencyContracts,
                 latencySources,
+                sourceViews,
                 seconds,
                 rate);
         }
 
         private String serializeTimeBinStats()
         {
-            final List<Long> keys = new ArrayList<>(latencyByTimeBin.keySet());
+            return serializeTimeBinStats(latencyByTimeBin);
+        }
+
+        private String serializeTimeBinStats(final Map<Long, LatencyDistribution> distributions)
+        {
+            final List<Long> keys = new ArrayList<>(distributions.keySet());
             keys.sort(Long::compareTo);
             final StringBuilder json = new StringBuilder(256).append('[');
             for (int index = 0; index < keys.size(); index++)
@@ -1425,14 +1525,19 @@ public final class AeronMvp
                     json.append(',');
                 }
                 final long key = keys.get(index);
-                latencyByTimeBin.get(key).appendJson(json, "time_bin", formatTimeBin(key));
+                distributions.get(key).appendJson(json, "time_bin", formatTimeBin(key));
             }
             return json.append(']').toString();
         }
 
         private String serializeContractStats()
         {
-            final List<String> keys = new ArrayList<>(latencyByInstrument.keySet());
+            return serializeContractStats(latencyByInstrument);
+        }
+
+        private String serializeContractStats(final Map<String, LatencyDistribution> distributions)
+        {
+            final List<String> keys = new ArrayList<>(distributions.keySet());
             keys.sort(String::compareTo);
             final StringBuilder json = new StringBuilder(256).append('[');
             for (int index = 0; index < keys.size(); index++)
@@ -1442,7 +1547,7 @@ public final class AeronMvp
                     json.append(',');
                 }
                 final String key = keys.get(index);
-                latencyByInstrument.get(key).appendJson(json, "contract", key);
+                distributions.get(key).appendJson(json, "contract", key);
             }
             return json.append(']').toString();
         }
@@ -1460,6 +1565,51 @@ public final class AeronMvp
                 }
                 final String key = keys.get(index);
                 latencyBySource.get(key).appendJson(json, "source", key);
+            }
+            return json.append(']').toString();
+        }
+
+        private String serializeSourceViews()
+        {
+            final Set<String> sourceSet = new HashSet<>(latestQuoteBySource.keySet());
+            sourceSet.addAll(latencyBySource.keySet());
+            final List<String> sources = new ArrayList<>(sourceSet);
+            sources.sort(String::compareTo);
+            final StringBuilder json = new StringBuilder(1024).append('[');
+            for (int index = 0; index < sources.size(); index++)
+            {
+                if (index > 0)
+                {
+                    json.append(',');
+                }
+                final String source = sources.get(index);
+                json.append("{\"source\":\"").append(jsonEscape(source)).append("\",\"quote\":");
+                final QuoteSnapshot quote = latestQuoteBySource.get(source);
+                if (quote == null)
+                {
+                    json.append("null");
+                }
+                else
+                {
+                    quote.appendJson(json);
+                }
+                json.append(",\"latency\":");
+                final LatencyDistribution latency = latencyBySource.get(source);
+                if (latency == null)
+                {
+                    json.append("null");
+                }
+                else
+                {
+                    latency.appendJson(json, "source", source);
+                }
+                json.append(",\"latency_by_time\":")
+                    .append(serializeTimeBinStats(
+                        latencyBySourceTimeBin.getOrDefault(source, java.util.Collections.emptyMap())))
+                    .append(",\"latency_by_contract\":")
+                    .append(serializeContractStats(
+                        latencyBySourceInstrument.getOrDefault(source, java.util.Collections.emptyMap())))
+                    .append('}');
             }
             return json.append(']').toString();
         }

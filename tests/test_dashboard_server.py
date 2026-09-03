@@ -43,57 +43,164 @@ class DashboardStatusTests(unittest.TestCase):
         self.assertIsNone(status["run"])
         self.assertEqual([], status["source_selection"]["available"])
 
-    def test_status_can_select_latest_run_for_a_market_source(self):
+    def test_status_uses_latest_run_sources_in_bash_order(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
-            runs = [
-                ("20260103T000000Z-3", "ctp-live"),
-                ("20260102T000000Z-2", "ydapi"),
-                ("20260101T000000Z-1", "ydapi"),
-            ]
-            for run_id, source in runs:
-                run = root / run_id
-                run.mkdir()
-                (run / "run.meta").write_text(
-                    f"run_id={run_id}\nsource={source}\nstatus=SUCCESS\n"
-                    f"started_at_utc={run_id[:8]}T00:00:00Z\n",
-                    encoding="utf-8",
-                )
+            old = root / "20260102T000000Z-2"
+            old.mkdir()
+            (old / "run.meta").write_text(
+                "run_id=old\nsource=old-source\nstatus=SUCCESS\n",
+                encoding="utf-8",
+            )
+            run = root / "20260103T000000Z-3"
+            run.mkdir()
+            (run / "run.meta").write_text(
+                "run_id=current\nsource=multi\nsources=ydapi-main,ctp-live-main\n"
+                "source_kind.ydapi-main=ydapi\nsource_latency_mode.ydapi-main=live\n"
+                "source_kind.ctp-live-main=ctp\n"
+                "source_latency_mode.ctp-live-main=historical_replay\n"
+                "latency_mode=mixed\nstatus=RUNNING\n",
+                encoding="utf-8",
+            )
 
             automatic = collect_status(root)
-            selected = collect_status(root, source="ydapi")
-            missing = collect_status(root, source="openctp")
+            selected = collect_status(root, source="ctp-live-main")
+            missing = collect_status(root, source="old-source")
 
-        self.assertEqual("ctp-live", automatic["run"]["source"])
-        self.assertEqual("20260102T000000Z-2", selected["run"]["id"])
-        self.assertEqual("ydapi", selected["source_selection"]["requested"])
-        self.assertEqual("ydapi", selected["source_selection"]["selected"])
+        self.assertEqual("current", automatic["run"]["id"])
+        self.assertEqual("ydapi-main", automatic["source_selection"]["selected"])
         self.assertEqual(
-            ["ctp-live", "ydapi"],
+            ["ydapi-main", "ctp-live-main"],
             [item["value"] for item in selected["source_selection"]["available"]],
         )
-        self.assertEqual("IDLE", missing["dashboard_status"])
-        self.assertEqual("openctp", missing["source_selection"]["requested"])
+        self.assertEqual("ctp-live-main", selected["source_selection"]["selected"])
+        self.assertEqual("historical_replay", selected["run"]["selected_source_latency_mode"])
+        self.assertFalse(selected["market_observation"]["valid_for_live_observation"])
+        self.assertIsNone(missing["source_selection"]["selected"])
 
-    def test_multi_source_run_exposes_its_connected_source_list(self):
+    def test_source_selection_filters_quote_and_latency_without_cross_source_leak(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             run = root / "20260104T000000Z-4"
             run.mkdir()
             (run / "run.meta").write_text(
-                "run_id=multi-run\nsource=multi\nsources=ctp-live,ydapi\n"
-                "latency_mode=mixed\nstatus=RUNNING\n",
+                "run_id=multi-run\nsource=multi\nsources=ydapi-main,ctp-live-main\n"
+                "source_kind.ydapi-main=ydapi\nsource_latency_mode.ydapi-main=live\n"
+                "source_kind.ctp-live-main=ctp\nsource_latency_mode.ctp-live-main=live\n"
+                "latency_mode=live\nexpected_count=20\nstatus=RUNNING\n",
                 encoding="utf-8",
             )
+            progress = {
+                "timestamp_ms": 2,
+                "received": 20,
+                "rate_per_second": 50.0,
+                "quote": {"source": "ctp-live-main", "instrument": "IF2609", "last_price": 4200.0},
+                "mean_ms": 99.0,
+                "source_views": [
+                    {
+                        "source": "ydapi-main",
+                        "quote": {"source": "ydapi-main", "instrument": "IC2609", "last_price": 5100.5},
+                        "latency": {"source": "ydapi-main", "count": 9, "mean_ms": 1.25,
+                                    "std_ms": 0.2, "p50_ms": 1.1, "p90_ms": 1.5,
+                                    "p95_ms": 1.7, "p99_ms": 1.9, "max_ms": 2.0},
+                        "latency_by_time": [{"time_bin": "ydapi-bin", "count": 9}],
+                        "latency_by_contract": [{"contract": "IC2609", "count": 9}],
+                    },
+                    {
+                        "source": "ctp-live-main",
+                        "quote": {"source": "ctp-live-main", "instrument": "IF2609", "last_price": 4200.0},
+                        "latency": {"source": "ctp-live-main", "count": 8, "mean_ms": 3.5,
+                                    "std_ms": 0.4, "p50_ms": 3.1, "p90_ms": 3.8,
+                                    "p95_ms": 4.0, "p99_ms": 4.2, "max_ms": 4.5},
+                        "latency_by_time": [{"time_bin": "ctp-bin", "count": 8}],
+                        "latency_by_contract": [{"contract": "IF2609", "count": 8}],
+                    },
+                ],
+            }
+            (run / "compute-live.ndjson").write_text(
+                json.dumps(progress) + "\n", encoding="utf-8"
+            )
 
-            status = collect_status(root)
+            ydapi = collect_status(root, source="ydapi-main")
+            ctp = collect_status(root, source="ctp-live-main")
 
-        self.assertEqual(["ctp-live", "ydapi"], status["run"]["sources"])
-        option = status["source_selection"]["available"][0]
-        self.assertEqual("multi", option["value"])
-        self.assertEqual("MULTI (CTP-LIVE + YDAPI)", option["label"])
-        self.assertEqual(["ctp-live", "ydapi"], option["sources"])
-        self.assertFalse(status["market_observation"]["valid_for_live_observation"])
+        self.assertEqual("IC2609", ydapi["compute"]["quote"]["instrument"])
+        self.assertEqual(5100.5, ydapi["compute"]["quote"]["last_price"])
+        self.assertEqual(1.25, ydapi["compute"]["mean_ms"])
+        self.assertEqual("ydapi-bin", ydapi["compute"]["latency_by_time"][0]["time_bin"])
+        self.assertEqual("IC2609", ydapi["compute"]["latency_by_contract"][0]["contract"])
+        self.assertEqual(1.25, ydapi["series"][0]["observed_delta_ms"])
+        self.assertEqual("IF2609", ctp["compute"]["quote"]["instrument"])
+        self.assertEqual(4200.0, ctp["compute"]["quote"]["last_price"])
+        self.assertEqual(3.5, ctp["market_observation"]["mean_abs_ms"])
+        self.assertEqual(20, ctp["compute"]["received"])
+
+    def test_configured_source_without_quote_does_not_fallback_to_another_source(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            run = root / "20260104T000000Z-4"
+            run.mkdir()
+            (run / "run.meta").write_text(
+                "run_id=multi-run\nsource=multi\nsources=ydapi-main,ctp-live-main\n"
+                "source_kind.ydapi-main=ydapi\nsource_kind.ctp-live-main=ctp\n"
+                "source_latency_mode.ydapi-main=live\nsource_latency_mode.ctp-live-main=live\n"
+                "status=RUNNING\n",
+                encoding="utf-8",
+            )
+            progress = {
+                "quote": {"source": "ydapi-main", "last_price": 5100.5},
+                "mean_ms": 1.25,
+                "source_views": [{
+                    "source": "ydapi-main",
+                    "quote": {"source": "ydapi-main", "last_price": 5100.5},
+                    "latency": {"source": "ydapi-main", "count": 1, "mean_ms": 1.25},
+                    "latency_by_time": [],
+                    "latency_by_contract": [],
+                }],
+            }
+            (run / "compute-live.ndjson").write_text(
+                json.dumps(progress) + "\n", encoding="utf-8"
+            )
+
+            status = collect_status(root, source="ctp-live-main")
+
+        self.assertEqual({}, status["compute"]["quote"])
+        self.assertIsNone(status["compute"]["mean_ms"])
+        self.assertEqual([], status["compute"]["latency_by_time"])
+        self.assertEqual("ctp-live-main", status["source_selection"]["selected"])
+
+    def test_source_with_quote_but_no_latency_sample_is_safe(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            run = root / "20260104T000000Z-5"
+            run.mkdir()
+            (run / "run.meta").write_text(
+                "run_id=multi-run\nsource=multi\nsources=ydapi-main,ctp-live-main\n"
+                "source_kind.ydapi-main=ydapi\nsource_kind.ctp-live-main=ctp\n"
+                "source_latency_mode.ydapi-main=live\n"
+                "source_latency_mode.ctp-live-main=live\nstatus=RUNNING\n",
+                encoding="utf-8",
+            )
+            progress = {
+                "timestamp_ms": 1,
+                "received": 1,
+                "source_views": [{
+                    "source": "ydapi-main",
+                    "quote": {"source": "ydapi-main", "last_price": 5100.5},
+                    "latency": None,
+                    "latency_by_time": [],
+                    "latency_by_contract": [],
+                }],
+            }
+            (run / "compute-live.ndjson").write_text(
+                json.dumps(progress) + "\n", encoding="utf-8"
+            )
+
+            status = collect_status(root, source="ydapi-main")
+
+        self.assertEqual(5100.5, status["compute"]["quote"]["last_price"])
+        self.assertIsNone(status["series"][0]["observed_delta_ms"])
+        self.assertEqual(0, status["compute"]["source_measured"])
 
     def test_latest_run_merges_progress_and_final_summary(self):
         with tempfile.TemporaryDirectory() as directory:

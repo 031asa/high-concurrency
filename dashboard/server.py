@@ -294,36 +294,52 @@ def _run_directories(result_root: Path) -> List[Path]:
     return sorted(candidates, key=lambda entry: entry.name, reverse=True)
 
 
-def _source_catalog(run_dirs: Iterable[Path]) -> List[Dict[str, Any]]:
+def _run_sources(meta: Dict[str, str]) -> List[str]:
+    sources = [item for item in meta.get("sources", "").split(",") if item]
+    if sources:
+        return sources
+    source = meta.get("source", "")
+    return [source] if source and source not in {"multi", "unknown"} else []
+
+
+def _source_catalog(meta: Dict[str, str]) -> List[Dict[str, Any]]:
     catalog: List[Dict[str, Any]] = []
-    seen = set()
-    for run_dir in run_dirs:
-        meta = _parse_key_values(run_dir / "run.meta")
-        source = meta.get("source", "unknown")
-        if source in seen:
-            continue
-        seen.add(source)
-        sources = [item for item in meta.get("sources", "").split(",") if item]
-        label = source.upper()
-        if source == "multi" and sources:
-            label = "MULTI (" + " + ".join(item.upper() for item in sources) + ")"
+    for source in _run_sources(meta):
         catalog.append(
             {
                 "value": source,
-                "label": label,
-                "sources": sources,
-                "latest_run_id": meta.get("run_id", run_dir.name),
-                "latest_started_at_utc": meta.get("started_at_utc", ""),
+                "label": source.upper(),
+                "kind": meta.get(f"source_kind.{source}", ""),
+                "latency_mode": meta.get(f"source_latency_mode.{source}", ""),
             }
         )
     return catalog
 
 
-def _latest_run(run_dirs: Iterable[Path], source: Optional[str] = None) -> Optional[Path]:
+def _latest_run(run_dirs: Iterable[Path]) -> Optional[Path]:
     for run_dir in run_dirs:
-        if source is None or _parse_key_values(run_dir / "run.meta").get("source", "unknown") == source:
-            return run_dir
+        return run_dir
     return None
+
+
+def _source_view(payload: Dict[str, Any], source: Optional[str]) -> Optional[Dict[str, Any]]:
+    if not source:
+        return None
+    views = payload.get("source_views")
+    if not isinstance(views, list):
+        return None
+    for view in views:
+        if isinstance(view, dict) and view.get("source") == source:
+            return view
+    return None
+
+
+def _source_latency(payload: Dict[str, Any], source: Optional[str]) -> Dict[str, Any]:
+    view = _source_view(payload, source)
+    if view is None:
+        return {}
+    latency = view.get("latency")
+    return latency if isinstance(latency, dict) else {}
 
 
 def _consumer_payload(run_dir: Path, name: str) -> tuple[Dict[str, Any], List[Dict[str, Any]]]:
@@ -334,6 +350,7 @@ def _consumer_payload(run_dir: Path, name: str) -> tuple[Dict[str, Any], List[Di
         "latency_by_time",
         "latency_by_contract",
         "latency_by_source",
+        "source_views",
     )
     for row in reversed(rows):
         for field in retained_fields:
@@ -348,12 +365,41 @@ def _consumer_payload(run_dir: Path, name: str) -> tuple[Dict[str, Any], List[Di
     return current, rows
 
 
+def _select_compute_source(
+    compute: Dict[str, Any], selected_source: Optional[str], isolate_source: bool
+) -> Dict[str, Any]:
+    selected = dict(compute)
+    view = _source_view(compute, selected_source)
+    if view is not None:
+        latency = view.get("latency") if isinstance(view.get("latency"), dict) else {}
+        selected["quote"] = view.get("quote") if isinstance(view.get("quote"), dict) else {}
+        selected["latency_by_time"] = (
+            view.get("latency_by_time") if isinstance(view.get("latency_by_time"), list) else []
+        )
+        selected["latency_by_contract"] = (
+            view.get("latency_by_contract")
+            if isinstance(view.get("latency_by_contract"), list)
+            else []
+        )
+        for field in ("mean_ms", "std_ms", "p50_ms", "p90_ms", "p95_ms", "p99_ms", "max_ms"):
+            selected[field] = latency.get(field)
+        selected["source_measured"] = latency.get("count", 0)
+    elif isolate_source:
+        selected["quote"] = {}
+        selected["latency_by_time"] = []
+        selected["latency_by_contract"] = []
+        for field in ("mean_ms", "std_ms", "p50_ms", "p90_ms", "p95_ms", "p99_ms", "max_ms"):
+            selected[field] = None
+        selected["source_measured"] = 0
+    selected["selected_source"] = selected_source
+    return selected
+
+
 def collect_status(result_root: Path, source: Optional[str] = None) -> Dict[str, Any]:
     now_ms = int(time.time() * 1000)
     requested_source = source or None
     run_dirs = _run_directories(result_root)
-    available_sources = _source_catalog(run_dirs)
-    run_dir = _latest_run(run_dirs, requested_source)
+    run_dir = _latest_run(run_dirs)
     if run_dir is None:
         return {
             "dashboard_status": "IDLE",
@@ -366,18 +412,36 @@ def collect_status(result_root: Path, source: Optional[str] = None) -> Dict[str,
             "source_selection": {
                 "requested": requested_source,
                 "selected": None,
-                "available": available_sources,
+                "available": [],
             },
         }
 
     meta = _parse_key_values(run_dir / "run.meta")
-    compute, compute_rows = _consumer_payload(run_dir, "compute")
+    sources = _run_sources(meta)
+    available_sources = _source_catalog(meta)
+    if requested_source is None:
+        selected_source = sources[0] if sources else None
+    else:
+        selected_source = requested_source if requested_source in sources else None
+    source_kind = meta.get(f"source_kind.{selected_source}", "") if selected_source else ""
+    source_latency_mode = (
+        meta.get(f"source_latency_mode.{selected_source}", "") if selected_source else ""
+    )
+    if len(sources) == 1:
+        source_kind = source_kind or meta.get("source", "")
+        source_latency_mode = source_latency_mode or meta.get("latency_mode", "live")
+    raw_compute, compute_rows = _consumer_payload(run_dir, "compute")
+    isolate_source = meta.get("source") == "multi" or len(sources) > 1
+    compute = _select_compute_source(raw_compute, selected_source, isolate_source)
     audit, _ = _consumer_payload(run_dir, "audit")
     run_status = meta.get("status", "RUNNING")
     run = {
         "id": meta.get("run_id", run_dir.name),
         "source": meta.get("source", "unknown"),
-        "sources": [item for item in meta.get("sources", "").split(",") if item],
+        "sources": sources,
+        "selected_source": selected_source,
+        "selected_source_kind": source_kind,
+        "selected_source_latency_mode": source_latency_mode,
         "latency_mode": meta.get("latency_mode", "live"),
         "expected_count": int(meta.get("expected_count", compute.get("expected", 0)) or 0),
         "sync_level": int(meta.get("sync_level", 0) or 0),
@@ -386,26 +450,30 @@ def collect_status(result_root: Path, source: Optional[str] = None) -> Dict[str,
         "status": run_status,
         "result_dir": str(run_dir),
     }
+    legacy_single_source = len(sources) == 1 and not isolate_source
     series = [
         {
-            key: row.get(key)
-            for key in (
-                "timestamp_ms",
-                "received",
-                "rate_per_second",
-                "mean_ms",
-                "p95_ms",
-                "max_ms",
-            )
+            **{
+                key: row.get(key)
+                for key in (
+                    "timestamp_ms",
+                    "received",
+                    "rate_per_second",
+                )
+            },
+            **(
+                _source_latency(row, selected_source)
+                if not legacy_single_source
+                else {key: row.get(key) for key in ("mean_ms", "p95_ms", "max_ms")}
+            ),
         }
         for row in compute_rows
     ]
     for point in series:
         point["observed_delta_ms"] = point.get("mean_ms")
-    latency_mode = run["latency_mode"]
-    historical = latency_mode in {"historical_replay", "mixed"}
+    historical = source_latency_mode == "historical_replay"
     market_observation = {
-        "status": "HISTORICAL" if historical else ("SYNTHETIC" if run["source"] == "synthetic" else "LIVE"),
+        "status": "HISTORICAL" if historical else ("SYNTHETIC" if source_kind == "synthetic" else "LIVE"),
         "valid_for_live_observation": not historical,
         "metric": "absolute_timestamp_delta",
         "definition": "|本地回调接收时间 - 行情事件时间|；不等于授时偏差，不参与对时。",
@@ -423,7 +491,7 @@ def collect_status(result_root: Path, source: Optional[str] = None) -> Dict[str,
         "series": series,
         "source_selection": {
             "requested": requested_source,
-            "selected": run["source"],
+            "selected": selected_source,
             "available": available_sources,
         },
     }

@@ -35,6 +35,7 @@ def test_loads_multiple_independent_source_configs(tmp_path):
     assert [config["name"] for config in configs] == ["sim-a", "sim-b"]
     assert [config["instrument"] for config in configs] == ["IC2609", "IC2610"]
     assert all(config["repeat"] == "1000" for config in configs)
+    assert all(config["latency_mode"] == "live" for config in configs)
 
 
 def test_loads_one_independent_source_config(tmp_path):
@@ -102,6 +103,7 @@ def test_ydapi_python_override_is_optional(tmp_path):
     assert config["account_config"] == str(
         (tmp_path / "config/account.json").resolve()
     )
+    assert config["latency_mode"] == "live"
 
 
 def test_rejects_duplicate_names(tmp_path):

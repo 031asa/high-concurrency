@@ -327,11 +327,13 @@ write_run_metadata() {
         printf 'run_id=%s\nsource=multi\nsources=%s\nsource_config_mode=%s\nlatency_mode=%s\nexpected_count=%s\ncount_per_source=%s\nsync_level=%s\nstarted_at_utc=%s\nstatus=%s\nrecording_id=%s\n' \
             "$run_id" "$source_csv" "$source_config_mode" "$latency_mode" "$total_count" "$count" "$sync_level" \
             "$run_started_at_utc" "$run_status" "${recording_id:-}"
-        if [[ "$source_config_mode" == independent ]]; then
-            for index in "${!source_names[@]}"; do
+        for index in "${!source_names[@]}"; do
+            printf 'source_kind.%s=%s\n' "${source_names[$index]}" "${source_kinds[$index]}"
+            printf 'source_latency_mode.%s=%s\n' "${source_names[$index]}" "${source_latency_modes[$index]}"
+            if [[ "$source_config_mode" == independent ]]; then
                 printf 'source_config.%s=%s\n' "${source_names[$index]}" "${source_config_paths[$index]}"
-            done
-        fi
+            fi
+        done
     } >"$temporary"
     mv "$temporary" "$run_dir/run.meta"
 }
