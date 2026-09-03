@@ -368,6 +368,7 @@ if [[ "$source" == ctp ]]; then
     "$ctp_python" "$PROJECT_ROOT/scripts/ydtrader.py" ctp-bridge \
         --front "$ctp_front" \
         --instruments "$ctp_instruments" \
+        --latency-mode "$ctp_latency_mode" \
         --udp-host 127.0.0.1 \
         --udp-port "$ctp_udp_port" \
         --repeat "$ctp_repeat" \

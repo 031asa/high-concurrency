@@ -462,6 +462,7 @@ for index in "${!source_names[@]}"; do
         LOCPATH="${source_ctp_locale_roots[$index]}" \
         "${source_pythons[$index]}" "$PROJECT_ROOT/scripts/ydtrader.py" ctp-bridge \
             --front "${source_fronts[$index]}" --instruments "${source_instrument_lists[$index]}" \
+            --latency-mode "${source_latency_modes[$index]}" \
             --udp-host 127.0.0.1 --udp-port "$port" --repeat "${source_repeats[$index]}" \
             --flow-path "$control_dir/$name-ctp-flow" \
             --idle-timeout-seconds "${source_idle_timeouts[$index]}" >"$run_dir/$name-bridge.log" 2>&1 &

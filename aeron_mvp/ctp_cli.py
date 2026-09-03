@@ -12,6 +12,8 @@ def parse_args(argv=None) -> argparse.Namespace:
     parser.add_argument("--repeat", type=int, default=10_000)
     parser.add_argument("--flow-path", required=True)
     parser.add_argument("--idle-timeout-seconds", type=float, default=60.0)
+    parser.add_argument("--latency-mode", choices=("live", "historical_replay"),
+                        default="historical_replay")
     args = parser.parse_args(argv)
     args.instruments = [item.strip() for item in args.instruments.split(",") if item.strip()]
     if not args.instruments:

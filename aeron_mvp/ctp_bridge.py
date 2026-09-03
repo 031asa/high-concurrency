@@ -56,7 +56,9 @@ def nonnegative_integer(value: object) -> int:
         return 0
 
 
-def market_timestamp(tick: object) -> tuple[int, str, bool]:
+def market_timestamp(
+    tick: object, local_receive_ns: int | None = None, *, live: bool = False
+) -> tuple[int, str, bool]:
     action_day = str(getattr(tick, "ActionDay", "") or "").strip()
     trading_day = str(getattr(tick, "TradingDay", "") or "").strip()
     date_text = action_day if len(action_day) == 8 else trading_day
@@ -67,6 +69,21 @@ def market_timestamp(tick: object) -> tuple[int, str, bool]:
         parsed = datetime.strptime(
             f"{date_text} {update_time}", "%Y%m%d %H:%M:%S"
         ).replace(tzinfo=CHINA_TZ, microsecond=millis * 1_000)
+        if live and local_receive_ns is not None:
+            received = datetime.fromtimestamp(local_receive_ns / 1_000_000_000, CHINA_TZ)
+            if parsed - received > timedelta(hours=12):
+                # Some night-session feeds put the next trading date in ActionDay.
+                # Only infer a calendar date for an explicitly LIVE source, and only
+                # when the received time-of-day is within one minute. Raw ActionDay
+                # and TradingDay are still encoded unchanged in their own fields.
+                base = received.replace(hour=parsed.hour, minute=parsed.minute,
+                                        second=parsed.second, microsecond=parsed.microsecond)
+                candidates = [base + timedelta(days=offset) for offset in (-1, 0, 1)]
+                nearest = min(candidates, key=lambda item: abs(item - received))
+                if (action_day and action_day != trading_day) or abs(nearest - received) > timedelta(minutes=1):
+                    return 0, raw, False
+                parsed = nearest
+                raw = f"{parsed:%Y%m%d} {update_time}.{millis:03d}"
         return int(parsed.timestamp() * 1_000_000_000), raw, True
     except (TypeError, ValueError, OverflowError):
         return 0, raw, False
@@ -85,7 +102,6 @@ class CtpMarketBridge(mdapi.CThostFtdcMdSpi):
         self.connected = False
         self.logged_in = False
         self.stop = threading.Event()
-        self.subscribe_one_at_a_time = False
         self.subscription_lock = threading.Lock()
         self.pending_subscriptions = []
         self.subscription_buffers = []
@@ -94,9 +110,6 @@ class CtpMarketBridge(mdapi.CThostFtdcMdSpi):
     def run(self) -> None:
         flow_path = Path(self.args.flow_path)
         flow_path.mkdir(parents=True, exist_ok=True)
-        self.subscribe_one_at_a_time = (
-            "openctp-tts" in str(mdapi.CThostFtdcMdApi.GetApiVersion()).lower()
-        )
         self.api = mdapi.CThostFtdcMdApi.CreateFtdcMdApi(f"{flow_path}/")
         self.api.RegisterFront(self.args.front)
         self.api.RegisterSpi(self)
@@ -134,35 +147,27 @@ class CtpMarketBridge(mdapi.CThostFtdcMdSpi):
         self.logged_in = True
         trading_day = str(getattr(response, "TradingDay", "") or "")
         encoded = [item.encode("utf-8") for item in self.args.instruments]
-        if self.subscribe_one_at_a_time:
-            # TTS 6.7.11 loses subscriptions when batched or issued back-to-back.
-            # Pace requests from the main loop, never sleep inside an SDK callback.
-            with self.subscription_lock:
-                self.subscription_buffers = [[item] for item in encoded]
-                self.pending_subscriptions = list(self.subscription_buffers)
-                self.next_subscription_at = time.monotonic() + 0.2
-            print(
-                f"CTP_BRIDGE state=SUBSCRIBE_QUEUED trading_day={trading_day} "
-                f"instruments={','.join(self.args.instruments)} mode=paced-single",
-                flush=True,
-            )
-            return
-        result = self.api.SubscribeMarketData(encoded, len(encoded))
+        # Both TTS and the live front need paced requests outside SDK callbacks.
+        # Keep the encoded buffers alive for native asynchronous processing.
+        with self.subscription_lock:
+            self.subscription_buffers = [[item] for item in encoded]
+            self.pending_subscriptions = list(self.subscription_buffers)
+            self.next_subscription_at = time.monotonic() + 0.5
         print(
-            f"CTP_BRIDGE state=SUBSCRIBE_REQUEST trading_day={trading_day} "
-            f"instruments={','.join(self.args.instruments)} result={result}",
+            f"CTP_BRIDGE state=SUBSCRIBE_QUEUED trading_day={trading_day} "
+            f"instruments={','.join(self.args.instruments)} mode=paced-single",
             flush=True,
         )
 
     def poll_subscriptions(self) -> None:
-        """Send at most one queued TTS request per interval outside SDK callbacks."""
+        """Send at most one queued CTP request per interval outside SDK callbacks."""
         with self.subscription_lock:
             now = time.monotonic()
             if (self.stop.is_set() or not self.connected or not self.logged_in
                     or not self.pending_subscriptions or now < self.next_subscription_at):
                 return
             encoded = self.pending_subscriptions.pop(0)
-            self.next_subscription_at = now + 0.2
+            self.next_subscription_at = now + 0.5
         result = self.api.SubscribeMarketData(encoded, 1)
         print(
             f"CTP_BRIDGE state=SUBSCRIBE_REQUEST instrument={encoded[0].decode('utf-8')} "
@@ -186,7 +191,10 @@ class CtpMarketBridge(mdapi.CThostFtdcMdSpi):
 
     def _publish_tick(self, tick) -> None:
         local_receive_ns = time.time_ns()
-        market_ns, market_raw, timestamp_valid = market_timestamp(tick)
+        market_ns, market_raw, timestamp_valid = market_timestamp(
+            tick, local_receive_ns,
+            live=getattr(self.args, "latency_mode", "historical_replay") == "live",
+        )
         self.sequence += 1
         self.last_tick_monotonic = time.monotonic()
         instrument = getattr(tick, "InstrumentID", "")

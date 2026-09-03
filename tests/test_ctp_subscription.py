@@ -1,4 +1,4 @@
-"""TTS pacing regression: native callback requests must not overwrite each other."""
+"""CTP pacing regression: both replay and live sources use deferred subscriptions."""
 import sys
 from types import ModuleType, SimpleNamespace
 import pytest
@@ -25,7 +25,6 @@ def subscription_bridge(monkeypatch):
         SubscribeMarketData=lambda items, count: calls.append((items, count)) or 0,
     )
     bridge.connected = True
-    bridge.subscribe_one_at_a_time = True
     yield bridge, clock, calls
     bridge.api = None
     bridge.close()
@@ -41,16 +40,16 @@ def test_tts_defers_and_paces_each_configured_contract(subscription_bridge):
     assert calls == []  # No sleeping/network requests in the login callback.
     bridge.poll_subscriptions()
     assert calls == []
-    clock[0] = 0.21
+    clock[0] = 0.51
     bridge.poll_subscriptions()
     assert calls == [([b"IF2609"], 1)]
-    clock[0] = 0.3
+    clock[0] = 0.7
     bridge.poll_subscriptions()
     assert len(calls) == 1
-    clock[0] = 0.42
+    clock[0] = 1.02
     bridge.poll_subscriptions()
     assert calls == [([b"IF2609"], 1), ([b"IC2609"], 1)]
-    clock[0] = 1.0
+    clock[0] = 2.0
     bridge.poll_subscriptions()
     assert len(calls) == 2
 
@@ -65,19 +64,32 @@ def test_tts_disconnect_clears_pending_and_relogin_requeues(subscription_bridge)
     assert bridge.pending_subscriptions == []
     bridge.connected = True
     login(bridge)
-    clock[0] = 1.21
+    clock[0] = 1.51
     bridge.poll_subscriptions()
     assert calls == [([b"IF2609"], 1)]
 
 
-def test_official_ctp_keeps_batch_subscription(subscription_bridge):
+def test_official_ctp_uses_paced_subscription(subscription_bridge, monkeypatch, tmp_path):
     bridge, clock, calls = subscription_bridge
-    bridge.subscribe_one_at_a_time = False
+    native_api = bridge.api
+    native_api.RegisterFront = lambda front: None
+    native_api.RegisterSpi = lambda spi: None
+    native_api.Init = lambda: None
+    bridge.args.flow_path = str(tmp_path)
+    bridge.args.front = "tcp://180.169.112.53:42213"
+    monkeypatch.setattr(ctp_bridge.mdapi, "CThostFtdcMdApi", SimpleNamespace(
+        GetApiVersion=lambda: "v6.7.11_20250617",
+        CreateFtdcMdApi=lambda path: native_api,
+    ), raising=False)
+    bridge.run()
     login(bridge)
-    assert calls == [([b"IF2609", b"IC2609"], 2)]
-    clock[0] = 1.0
+    assert calls == []
+    clock[0] = 0.51
     bridge.poll_subscriptions()
-    assert len(calls) == 1
+    assert calls == [([b"IF2609"], 1)]
+    clock[0] = 1.02
+    bridge.poll_subscriptions()
+    assert calls == [([b"IF2609"], 1), ([b"IC2609"], 1)]
 
 
 def test_tts_stop_does_not_send_more_requests(subscription_bridge):

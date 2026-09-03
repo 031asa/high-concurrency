@@ -120,8 +120,12 @@ Windows 桌面入口来自 `deploy/windows/start-ydtrader-dashboard.cmd`。它�
 不会复制业务逻辑，并启动隐藏的 WSL 保活客户端（同一项目重复点击只保留一份）。仅启用 systemd
 不能防止 WSL 空闲退出；`ydtrader_stack.sh stop` 后保活客户端会自动退出。
 Windows 关机、休眠或显式执行 `wsl --shutdown` 仍会中断接收；恢复后点击桌面入口重新启动。
-TTS 6.7.11 使用主循环中间隔 200ms 的逐合约订阅，避免批量/连续快速订阅不回调；官方 CTP 保持批量订阅。
+TTS 与官方 CTP 均使用主循环中间隔 500ms 的逐合约订阅，并保留原生请求缓冲区。
+2026-09-03 夜盘实测：指定实盘前置的批量订阅虽确认成功却没有行情，改用上述方式后收到当前夜盘行情；
+实盘 11 合约配置不变，不用历史回放替代实时源。夜盘交易日可能为次日，应结合 ActionDay 和 UpdateTime 验收。
 订阅确认不等于行情到达，应检查 `FORWARDING`、Compute 接收数和市场时间是否持续变化。
+仅当源明确为 live，且 ActionDay 等于未来交易日而 UpdateTime 距接收时刻不超过一分钟时，
+延迟使用最近的实际日历日期；原始 ActionDay/TradingDay 保留，historical_replay 不改写日期。
 两份非敏感行情源配置位于 `config/market-sources/ctp-tts-7x24.json` 和
 `config/market-sources/ctp-live-5level.json`；每个来源的合约、前置与超时均可独立调整。
 当前回放源仅配置已验证回调的 IF2609、IC2609、IH2609、IM2609、au2612、ag2612；
