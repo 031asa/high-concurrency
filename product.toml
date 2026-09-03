@@ -1,0 +1,36 @@
+[product]
+id = "ydtrader-high-concurrency"
+executable = "ydtrader"
+python_package = "ydcore"
+entrypoint = "scripts/ydtrader.py"
+
+[paths]
+install_root = "/opt/ydtrader"
+state_root = "/var/lib/ydtrader"
+
+[protection]
+protected_modules = ["launcher", "marketdata", "monitoring", "trading"]
+nuitka_include_modules = [
+  "pyyd",
+  "ydcore.launcher",
+  "ydcore.marketdata",
+  "ydcore.monitoring",
+  "ydcore.trading",
+]
+nuitka_include_packages = []
+
+[container]
+base_image = "ubuntu:24.04"
+builder_image = "continuumio/miniconda3:24.7.1-0"
+runtime_packages = ["ca-certificates"]
+uid = 10001
+
+[build]
+environment_file = "environment.yml"
+
+[validation]
+args = ["--help"]
+expected_exit_code = 0
+
+[licensing]
+features = ["market-service"]
