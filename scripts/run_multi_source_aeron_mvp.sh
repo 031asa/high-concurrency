@@ -354,6 +354,23 @@ stop_if_running() {
         wait "$process_id" 2>/dev/null || true
     fi
 }
+check_child_failure() {
+    local process_id=${1:-}
+    local component=$2
+    local status
+    [[ -n "$process_id" ]] || return 0
+    if ! kill -0 "$process_id" 2>/dev/null; then
+        if wait "$process_id"; then
+            return 0  # A finite run may finish just before the mux exits.
+        else
+            status=$?
+            printf 'pipeline child failed: %s (exit=%s); see %s/%s.log\n' \
+                "$component" "$status" "$run_dir" "$component" >&2
+            return "$status"
+        fi
+    fi
+}
+
 cleanup() {
     for process_id in "${bridge_pids[@]:-}"; do stop_if_running "$process_id"; done
     stop_if_running "$mux_pid"
@@ -478,6 +495,11 @@ for index in "${!source_names[@]}"; do
 done
 
 while kill -0 "$mux_pid" 2>/dev/null; do
+    check_child_failure "$server_pid" server
+    check_child_failure "$publisher_pid" publisher
+    check_child_failure "$compute_pid" compute-live
+    check_child_failure "$audit_pid" audit-live
+    check_child_failure "$egress_pid" zmq-egress
     for index in "${!bridge_pids[@]}"; do
         if ! kill -0 "${bridge_pids[$index]}" 2>/dev/null; then
             wait "${bridge_pids[$index]}" || true

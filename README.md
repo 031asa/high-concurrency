@@ -124,6 +124,10 @@ TTS 与官方 CTP 均使用主循环中间隔 500ms 的逐合约订阅，并保�
 2026-09-03 夜盘实测：指定实盘前置的批量订阅虽确认成功却没有行情，改用上述方式后收到当前夜盘行情；
 实盘 11 合约配置不变，不用历史回放替代实时源。夜盘交易日可能为次日，应结合 ActionDay 和 UpdateTime 验收。
 订阅确认不等于行情到达，应检查 `FORWARDING`、Compute 接收数和市场时间是否持续变化。
+运行脚本同时检查 Publisher、Aeron Server、Compute、Audit 和可选 ZMQ Egress；
+子进程异常退出时整个运行标为失败并交由 systemd 重启，避免 Bridge 仍有回调但曲线停住。
+Bridge/Mux/Publisher 的 UDP 序号缺口仍严格报错，不跳过缺口伪装完整；
+自动重启只能恢复后续接收，不能补回中断期间的行情，也不代表 UDP 丢包原因已消除。
 仅当源明确为 live，且 ActionDay 等于未来交易日而 UpdateTime 距接收时刻不超过一分钟时，
 延迟使用最近的实际日历日期；原始 ActionDay/TradingDay 保留，historical_replay 不改写日期。
 两份非敏感行情源配置位于 `config/market-sources/ctp-tts-7x24.json` 和
