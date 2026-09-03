@@ -7,22 +7,24 @@ ydtrader_runtime_error() {
     return 2
 }
 
-ydtrader_require_wsl_project() {
+ydtrader_is_wsl() {
+    grep -qi microsoft /proc/sys/kernel/osrelease 2>/dev/null
+}
+
+ydtrader_require_linux_project() {
     local project_root=$1
     [[ "$(uname -s)" == Linux ]] || {
-        ydtrader_runtime_error "Linux under WSL 2 is required"
+        ydtrader_runtime_error "Linux is required"
         return
     }
-    grep -qi microsoft /proc/sys/kernel/osrelease 2>/dev/null || {
-        ydtrader_runtime_error "WSL 2 is required"
-        return
-    }
-    case "$(readlink -f -- "$project_root")/" in
-        /mnt/*)
-            ydtrader_runtime_error "repository must be in the WSL Linux filesystem"
-            return
-            ;;
-    esac
+    if ydtrader_is_wsl; then
+        case "$(readlink -f -- "$project_root")/" in
+            /mnt/*)
+                ydtrader_runtime_error "repository must be in the WSL Linux filesystem"
+                return
+                ;;
+        esac
+    fi
 }
 
 ydtrader_find_conda() {
@@ -40,7 +42,7 @@ ydtrader_find_conda() {
 ydtrader_validate_conda_python() {
     local project_root=$1
     local candidate=${2:-}
-    ydtrader_require_wsl_project "$project_root"
+    ydtrader_require_linux_project "$project_root"
     if [[ -z "$candidate" && -n "${CONDA_PREFIX:-}" ]]; then
         candidate="$CONDA_PREFIX/bin/python"
     fi
@@ -65,7 +67,7 @@ ydtrader_prepare_conda_prefix() {
     local conda_exe
     local fingerprint
     local marker="$runtime_dir/conda/.ydtrader-environment.sha256"
-    ydtrader_require_wsl_project "$project_root"
+    ydtrader_require_linux_project "$project_root"
     fingerprint=$(
         cd "$project_root"
         sha256sum environment.yml \
