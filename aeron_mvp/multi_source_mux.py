@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Merge multiple loopback UDP market sources into one ordered adapter stream."""
+"""Merge one or more loopback UDP market sources into one ordered adapter stream."""
 
 from __future__ import annotations
 
@@ -65,8 +65,8 @@ def parse_input_specs(values: list[str]) -> list[InputSpec]:
         names.add(name)
         ports.add(port)
         specs.append(InputSpec(name, port))
-    if len(specs) < 2:
-        raise ValueError("multi-source mode requires at least two inputs")
+    if not specs:
+        raise ValueError("at least one input is required")
     return specs
 
 

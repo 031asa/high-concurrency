@@ -30,7 +30,18 @@ ydapi_api_config="$PROJECT_ROOT/config/ydClient.ini"
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
-        --source-config) source_config_files+=("$2"); shift 2 ;;
+        --source-config)
+            shift
+            source_config_count=${#source_config_files[@]}
+            while [[ $# -gt 0 && "$1" != --* ]]; do
+                source_config_files+=("$1")
+                shift
+            done
+            [[ ${#source_config_files[@]} -gt $source_config_count ]] || {
+                printf -- '--source-config requires at least one JSON path\n' >&2
+                exit 64
+            }
+            ;;
         --sources) sources=$2; legacy_source_option_used=1; shift 2 ;;
         --count) count=$2; shift 2 ;;
         --sync-level) sync_level=$2; shift 2 ;;
@@ -211,8 +222,8 @@ else
     done
 fi
 
-[[ "${#source_names[@]}" -ge 2 ]] || {
-    printf 'at least two enabled market sources are required\n' >&2
+[[ "${#source_names[@]}" -ge 1 ]] || {
+    printf 'at least one enabled market source is required\n' >&2
     exit 64
 }
 [[ $((base_udp_port + ${#source_names[@]})) -le 65535 ]] || {

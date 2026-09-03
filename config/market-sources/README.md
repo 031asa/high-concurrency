@@ -8,8 +8,9 @@ Deterministic smoke run:
 
 ```bash
 bash scripts/run_multi_source_aeron_mvp.sh \
-  --source-config config/market-sources/synthetic-sim-a.json \
-  --source-config config/market-sources/synthetic-sim-b.json \
+  --source-config \
+    config/market-sources/synthetic-sim-a.json \
+    config/market-sources/synthetic-sim-b.json \
   --count 1000
 ```
 
@@ -18,14 +19,17 @@ callback from each source:
 
 ```bash
 bash scripts/run_multi_source_aeron_mvp.sh \
-  --source-config /secure/market-sources/ctp-live.json \
-  --source-config /secure/market-sources/ydapi-main.json \
+  --source-config \
+    /secure/market-sources/ctp-live.json \
+    /secure/market-sources/ydapi-main.json \
   --count 1
 ```
 
 Real-source example files have the `.example.json` suffix. Copy them to
-deployment-owned paths, replace placeholders, and pass each resulting file with
-a separate `--source-config`. Do not commit account credentials.
+deployment-owned paths, replace placeholders, and pass the resulting files after
+one `--source-config`. One enabled file is valid; add as many files as required.
+The repeated `--source-config <file>` form remains compatible. Do not commit
+account credentials.
 
 Common fields:
 

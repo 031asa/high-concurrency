@@ -226,8 +226,8 @@ def load_source_configs(paths: list[Path], project_root: Path) -> list[dict[str,
             raise SourceConfigError(f"duplicate source name: {config['name']}")
         names.add(config["name"])
         enabled.append(config)
-    if len(enabled) < 2:
-        raise SourceConfigError("at least two enabled source configs are required")
+    if not enabled:
+        raise SourceConfigError("at least one enabled source config is required")
     return enabled
 
 

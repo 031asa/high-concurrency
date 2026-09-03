@@ -34,6 +34,16 @@ def test_tag_packet_preserves_layout_and_adds_source(version):
     assert tagged[-32:].split(b"\0", 1)[0] == b"ydapi"
 
 
+def test_input_list_accepts_one_or_more_sources():
+    assert [item.source for item in parse_input_specs(["ydapi=24001"])] == ["ydapi"]
+    assert [item.source for item in parse_input_specs(["ctp-live=24001", "ydapi=24002"])] == [
+        "ctp-live",
+        "ydapi",
+    ]
+    with pytest.raises(ValueError, match="at least one"):
+        parse_input_specs([])
+
+
 def test_input_list_requires_unique_sources_and_ports():
     assert [item.source for item in parse_input_specs(["ctp-live=24001", "ydapi=24002"])] == [
         "ctp-live",
@@ -43,5 +53,3 @@ def test_input_list_requires_unique_sources_and_ports():
         parse_input_specs(["ydapi=24001", "ydapi=24002"])
     with pytest.raises(ValueError, match="duplicate UDP port"):
         parse_input_specs(["ydapi=24001", "ctp=24001"])
-    with pytest.raises(ValueError, match="at least two"):
-        parse_input_specs(["ydapi=24001"])

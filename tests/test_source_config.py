@@ -37,6 +37,14 @@ def test_loads_multiple_independent_source_configs(tmp_path):
     assert all(config["repeat"] == "1000" for config in configs)
 
 
+def test_loads_one_independent_source_config(tmp_path):
+    source = write_config(tmp_path / "only.json", synthetic("sim-a"))
+
+    configs = load_source_configs([source], tmp_path)
+
+    assert [config["name"] for config in configs] == ["sim-a"]
+
+
 def test_ctp_paths_are_resolved_from_project_root(tmp_path):
     config_path = write_config(
         tmp_path / "ctp.json",
@@ -104,14 +112,24 @@ def test_rejects_duplicate_names(tmp_path):
         load_source_configs([first, second], tmp_path)
 
 
-def test_disabled_config_does_not_count_as_enabled_source(tmp_path):
+def test_disabled_config_is_ignored_when_another_source_is_enabled(tmp_path):
     first = write_config(tmp_path / "first.json", synthetic("sim-a"))
     disabled_document = synthetic("sim-b")
     disabled_document["enabled"] = False
     second = write_config(tmp_path / "second.json", disabled_document)
 
-    with pytest.raises(SourceConfigError, match="at least two enabled"):
-        load_source_configs([first, second], tmp_path)
+    configs = load_source_configs([first, second], tmp_path)
+
+    assert [config["name"] for config in configs] == ["sim-a"]
+
+
+def test_rejects_config_list_without_an_enabled_source(tmp_path):
+    document = synthetic("sim-a")
+    document["enabled"] = False
+    source = write_config(tmp_path / "disabled.json", document)
+
+    with pytest.raises(SourceConfigError, match="at least one enabled"):
+        load_source_configs([source], tmp_path)
 
 
 def test_rejects_unknown_fields(tmp_path):
