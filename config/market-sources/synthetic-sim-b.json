@@ -1,0 +1,9 @@
+{
+  "schema_version": 1,
+  "name": "sim-b",
+  "kind": "synthetic",
+  "enabled": true,
+  "instrument": "IC2610",
+  "repeat": 1000,
+  "source_timeout_seconds": 60
+}

@@ -1,0 +1,12 @@
+{
+  "schema_version": 1,
+  "name": "ctp-live-main",
+  "kind": "ctp",
+  "enabled": true,
+  "front": "tcp://182.254.243.31:30011",
+  "api_kind": "official",
+  "latency_mode": "live",
+  "instruments": ["IF2609", "IC2609", "IH2609", "IM2609"],
+  "repeat": 1,
+  "source_timeout_seconds": 60
+}

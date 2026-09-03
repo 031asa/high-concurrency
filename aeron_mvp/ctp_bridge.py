@@ -75,6 +75,7 @@ class CtpMarketBridge(mdapi.CThostFtdcMdSpi):
         self.socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         self.destination = (args.udp_host, args.udp_port)
         self.sequence = 0
+        self.publish_lock = threading.Lock()
         self.last_tick_monotonic = time.monotonic()
         self.connected = False
         self.logged_in = False
@@ -135,6 +136,10 @@ class CtpMarketBridge(mdapi.CThostFtdcMdSpi):
         )
 
     def OnRtnDepthMarketData(self, tick) -> None:
+        with self.publish_lock:
+            self._publish_tick(tick)
+
+    def _publish_tick(self, tick) -> None:
         local_receive_ns = time.time_ns()
         market_ns, market_raw, timestamp_valid = market_timestamp(tick)
         self.sequence += 1

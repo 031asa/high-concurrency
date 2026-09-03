@@ -36,19 +36,20 @@ bash scripts/run_aeron_mvp.sh --count 100000 --sync-level 1
 
 ## 多行情源同时接入
 
-`--sources` 接受逗号分隔的 `<类型>[:来源名]` 列表，当前类型为 `synthetic`、`ctp`、
-`ydapi`。下面的离线命令同时启动两个模拟源：
+每个行情源使用一份独立 JSON 配置，并重复传入 `--source-config`。当前类型为 `synthetic`、
+`ctp`、`ydapi`。下面的离线命令同时启动两个模拟源：
 
 ```bash
 bash scripts/run_multi_source_aeron_mvp.sh \
-  --sources synthetic:sim-a,synthetic:sim-b \
+  --source-config config/market-sources/synthetic-sim-a.json \
+  --source-config config/market-sources/synthetic-sim-b.json \
   --count 1000
 ```
 
-真实源可组合为 `--sources ctp:ctp-tts,ydapi:ydapi-main`，并通过 `--ctp-python` 和
-`--ydapi-python` 指向各自隔离的 Conda runtime。`--count` 按每个源计算。每个源独立校验输入
-sequence，合并后共用一条全局 sequence、一份 Archive recording 和一个 ZMQ 出口；任一源失败
-都会令验收失败。多源 mux、bridge 和下游项目互不导入对方源码。
+真实源应从 `config/market-sources/*.example.json` 建立部署配置，每份配置独立指定 runtime、
+连接端点、合约、账号文件、repeat 和超时。`--count` 按每个源计算。每个源独立校验输入 sequence，
+合并后共用一条全局 sequence、一份 Archive recording 和一个 ZMQ 出口；任一源失败都会令验收
+失败。多源 mux、bridge 和下游项目互不导入对方源码。旧 `--sources` 共享参数模式只用于兼容。
 
 ## 通用 ZMQ/SBE 行情出口
 

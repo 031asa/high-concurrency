@@ -111,8 +111,10 @@ flowchart TB
 
 - 实线表示当前已经实现并完成验收的链路，虚线表示下一阶段规划。
 - YDApi 已通过专用 bridge 接入固定 UDP adapter 协议，并共用 SBE、Aeron、Archive、计算、审计和重放链路。
-- 多源入口以 `--sources <类型>[:来源名],...` 同时启动多个独立 bridge。每个源在自己的 loopback
-  UDP 端口上维护并校验输入 sequence；Multi-source Mux 写入来源标签并为合并流分配全局 sequence。
+- 多源入口为每个行情源重复传入一份 `--source-config <独立 JSON>`，分别配置 runtime、连接端点、
+  合约、repeat 和超时，再启动对应的独立 bridge。每个源在自己的 loopback UDP 端口上维护并校验
+  输入 sequence；Multi-source Mux 写入来源标签并为合并流分配全局 sequence。旧的 `--sources`
+  共享参数模式只为命令兼容保留，新部署不使用它。
   合并后仍只有一条 Aeron publication、一份 Archive recording 和一个 ZMQ 出口，避免复制持久化与恢复链路。
 - 任一来源缺包、断流或提前退出都会使整次多源运行失败。Compute 输出 `latency_by_source`，
   Dashboard 同时展示本次连接的来源列表和按源统计。

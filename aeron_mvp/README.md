@@ -78,33 +78,39 @@ AERON_MVP_ACCEPTANCE live_compute=SUCCESS live_audit=SUCCESS replay_match=YES
 
 ## 多行情源同时接入
 
-`--sources` 是逗号分隔的可选列表，每项格式为 `<类型>[:来源名]`。类型目前支持
-`synthetic`、`ctp`、`ydapi`，来源名会写进每条 SBE 行情的 `source` 字段；来源名必须唯一。
+每个行情源使用一份独立 JSON 配置，并用重复的 `--source-config` 传给启动脚本。类型支持
+`synthetic`、`ctp`、`ydapi`，配置中的唯一 `name` 会写进每条 SBE 行情的 `source` 字段。
 下面的本地命令会同时启动两个独立模拟源，每个源发布 1000 条：
 
 ```bash
 bash scripts/run_multi_source_aeron_mvp.sh \
-  --sources synthetic:sim-a,synthetic:sim-b \
+  --source-config config/market-sources/synthetic-sim-a.json \
+  --source-config config/market-sources/synthetic-sim-b.json \
   --count 1000
 ```
 
-同时连接 OpenCTP 与 YDApi：
+同时连接 OpenCTP 与 YDApi 时，先从 `.example.json` 复制部署配置，分别填写两边 runtime、
+front、账号文件和合约，再同时传入：
 
 ```bash
 bash scripts/run_multi_source_aeron_mvp.sh \
-  --sources ctp:ctp-tts,ydapi:ydapi-main \
-  --count 1000000 \
-  --ctp-python result/ctp-tts-runtime/conda/bin/python \
-  --ctp-api-kind tts \
-  --ctp-latency-mode historical_replay \
-  --ydapi-python "$CONDA_PREFIX/bin/python"
+  --source-config /secure/market-sources/ctp-tts.json \
+  --source-config /secure/market-sources/ydapi-main.json \
+  --count 1000000
 ```
+
+每份配置独立控制 Python runtime、连接端点、合约、repeat 和超时；CTP 配置还独立控制
+`api_kind` 与 `latency_mode`，YDApi 配置独立引用 account/API 文件。相对路径从项目根目录解析，
+账号密码不能直接写进行情源配置。完整字段和样例见 `config/market-sources/README.md`。
 
 `--count` 是每个源的目标条数，总条数等于来源数乘以该值。每个 bridge 使用独立 loopback
 UDP 端口和独立输入 sequence；轻量 mux 校验每个源没有缺口后，为合并流分配全局 sequence，
 再送入原有单一 Aeron publication、Archive recording、Compute/Audit 和 ZMQ 出口。任一源断流、
 缺包或提前退出都会让整次运行失败，不会静默降级。Dashboard 的行情源列表会显示该次运行连接的
 全部来源，进度快照同时包含 `latency_by_source`。
+
+旧的 `--sources <类型>[:来源名],...` 及共享的 `--ctp-*`/`--ydapi-*` 参数继续保留，供既有
+命令兼容使用；它们不能与 `--source-config` 混用。新部署应始终使用逐源配置模式。
 
 这条入口只组合高并发项目已有的接入接口，不导入下游 hpquant 源码。部署时两个项目仍可分别
 打包，在服务器上通过高并发侧 ZMQ `PUSH` 与 hpquant 侧 `PULL` 连接。

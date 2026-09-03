@@ -43,7 +43,7 @@ mkdir -p \
     "$STAGE_DIST/aeron_mvp/build" \
     "$STAGE_DIST/aeron_mvp/lib" \
     "$STAGE_DIST/aeron_mvp/schema" \
-    "$STAGE_DIST/config" \
+    "$STAGE_DIST/config/market-sources" \
     "$STAGE_DIST/dashboard" \
     "$STAGE_DIST/licenses" \
     "$STAGE_DIST/scripts" \
@@ -57,6 +57,7 @@ cp -a "$SCRIPT_DIR/env.sh" "$STAGE_DIST/aeron_mvp/env.sh"
 cp -a "$SCRIPT_DIR/ctp_bridge.py" "$STAGE_DIST/aeron_mvp/ctp_bridge.py"
 cp -a "$SCRIPT_DIR/ydapi_bridge.py" "$STAGE_DIST/aeron_mvp/ydapi_bridge.py"
 cp -a "$SCRIPT_DIR/multi_source_mux.py" "$STAGE_DIST/aeron_mvp/multi_source_mux.py"
+cp -a "$SCRIPT_DIR/source_config.py" "$STAGE_DIST/aeron_mvp/source_config.py"
 cp -a "$SCRIPT_DIR/synthetic_bridge.py" "$STAGE_DIST/aeron_mvp/synthetic_bridge.py"
 cp -a "$SCRIPT_DIR/market_wire.py" "$STAGE_DIST/aeron_mvp/market_wire.py"
 cp -a "$SCRIPT_DIR/zmq_market_probe.py" "$STAGE_DIST/aeron_mvp/zmq_market_probe.py"
@@ -77,6 +78,7 @@ cp -a "$PROJECT_ROOT/scripts/bootstrap_ctp_live.sh" "$STAGE_DIST/scripts/bootstr
 cp -a "$PROJECT_ROOT/utils/conda_runtime.sh" "$STAGE_DIST/utils/conda_runtime.sh"
 cp -a "$PROJECT_ROOT/dashboard/." "$STAGE_DIST/dashboard/"
 cp -a "$PROJECT_ROOT/environment.yml" "$STAGE_DIST/environment.yml"
+cp -a "$PROJECT_ROOT/config/market-sources/." "$STAGE_DIST/config/market-sources/"
 cp -a "$PROJECT_ROOT/vendor/wheels/pyyd-1.486.96.99-cp39-cp39-linux_x86_64.whl" \
     "$STAGE_DIST/vendor/wheels/"
 cp -a "$SCRIPT_DIR/PACKAGE_README.md" "$STAGE_DIST/README.md"
@@ -104,6 +106,7 @@ chmod 0755 \
     "$STAGE_DIST/aeron_mvp/ctp_bridge.py" \
     "$STAGE_DIST/aeron_mvp/ydapi_bridge.py" \
     "$STAGE_DIST/aeron_mvp/multi_source_mux.py" \
+    "$STAGE_DIST/aeron_mvp/source_config.py" \
     "$STAGE_DIST/aeron_mvp/synthetic_bridge.py" \
     "$STAGE_DIST/aeron_mvp/zmq_market_probe.py" \
     "$STAGE_DIST/scripts/run_aeron_mvp.sh" \
