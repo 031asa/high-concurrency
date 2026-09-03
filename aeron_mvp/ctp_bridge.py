@@ -85,10 +85,18 @@ class CtpMarketBridge(mdapi.CThostFtdcMdSpi):
         self.connected = False
         self.logged_in = False
         self.stop = threading.Event()
+        self.subscribe_one_at_a_time = False
+        self.subscription_lock = threading.Lock()
+        self.pending_subscriptions = []
+        self.subscription_buffers = []
+        self.next_subscription_at = 0.0
 
     def run(self) -> None:
         flow_path = Path(self.args.flow_path)
         flow_path.mkdir(parents=True, exist_ok=True)
+        self.subscribe_one_at_a_time = (
+            "openctp-tts" in str(mdapi.CThostFtdcMdApi.GetApiVersion()).lower()
+        )
         self.api = mdapi.CThostFtdcMdApi.CreateFtdcMdApi(f"{flow_path}/")
         self.api.RegisterFront(self.args.front)
         self.api.RegisterSpi(self)
@@ -110,8 +118,10 @@ class CtpMarketBridge(mdapi.CThostFtdcMdSpi):
         print(f"CTP_BRIDGE state=LOGIN_REQUEST result={result}", flush=True)
 
     def OnFrontDisconnected(self, reason: int) -> None:
-        self.connected = False
-        self.logged_in = False
+        with self.subscription_lock:
+            self.connected = False
+            self.logged_in = False
+            self.pending_subscriptions.clear()
         print(f"CTP_BRIDGE state=DISCONNECTED reason={reason}", flush=True)
 
     def OnRspUserLogin(self, response, info, request_id: int, is_last: bool) -> None:
@@ -124,12 +134,42 @@ class CtpMarketBridge(mdapi.CThostFtdcMdSpi):
         self.logged_in = True
         trading_day = str(getattr(response, "TradingDay", "") or "")
         encoded = [item.encode("utf-8") for item in self.args.instruments]
+        if self.subscribe_one_at_a_time:
+            # TTS 6.7.11 loses subscriptions when batched or issued back-to-back.
+            # Pace requests from the main loop, never sleep inside an SDK callback.
+            with self.subscription_lock:
+                self.subscription_buffers = [[item] for item in encoded]
+                self.pending_subscriptions = list(self.subscription_buffers)
+                self.next_subscription_at = time.monotonic() + 0.2
+            print(
+                f"CTP_BRIDGE state=SUBSCRIBE_QUEUED trading_day={trading_day} "
+                f"instruments={','.join(self.args.instruments)} mode=paced-single",
+                flush=True,
+            )
+            return
         result = self.api.SubscribeMarketData(encoded, len(encoded))
         print(
             f"CTP_BRIDGE state=SUBSCRIBE_REQUEST trading_day={trading_day} "
             f"instruments={','.join(self.args.instruments)} result={result}",
             flush=True,
         )
+
+    def poll_subscriptions(self) -> None:
+        """Send at most one queued TTS request per interval outside SDK callbacks."""
+        with self.subscription_lock:
+            now = time.monotonic()
+            if (self.stop.is_set() or not self.connected or not self.logged_in
+                    or not self.pending_subscriptions or now < self.next_subscription_at):
+                return
+            encoded = self.pending_subscriptions.pop(0)
+            self.next_subscription_at = now + 0.2
+        result = self.api.SubscribeMarketData(encoded, 1)
+        print(
+            f"CTP_BRIDGE state=SUBSCRIBE_REQUEST instrument={encoded[0].decode('utf-8')} "
+            f"result={result} mode=paced-single", flush=True,
+        )
+        if result != 0:
+            raise RuntimeError(f"CTP subscription request failed result={result}")
 
     def OnRspSubMarketData(self, instrument, info, request_id: int, is_last: bool) -> None:
         error_id = int(getattr(info, "ErrorID", 0) or 0) if info is not None else 0
@@ -218,6 +258,7 @@ def run(args: argparse.Namespace) -> int:
     started = time.monotonic()
     try:
         while not bridge.stop.wait(0.1):
+            bridge.poll_subscriptions()
             reference = bridge.last_tick_monotonic if bridge.sequence else started
             if time.monotonic() - reference > args.idle_timeout_seconds:
                 raise TimeoutError(

@@ -1,0 +1,12 @@
+{
+  "schema_version": 1,
+  "name": "ctp-live-5level",
+  "kind": "ctp",
+  "enabled": true,
+  "front": "tcp://180.169.112.53:42213",
+  "api_kind": "official",
+  "latency_mode": "live",
+  "instruments": ["IF2609", "IC2609", "IH2609", "IM2609", "au2612", "ag2612", "cu2610", "rb2701", "sc2610", "i2701", "m2701"],
+  "repeat": 1,
+  "source_timeout_seconds": 86400
+}

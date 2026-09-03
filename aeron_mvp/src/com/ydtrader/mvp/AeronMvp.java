@@ -322,7 +322,7 @@ public final class AeronMvp
         final String bindHost = options.value("bind-host", "127.0.0.1");
         final int udpPort = options.integer("udp-port", 24001, 1, 65535);
         final long sourceTimeoutSeconds = options.longValue(
-            "source-timeout-seconds", 60L, 1L, 3600L);
+            "source-timeout-seconds", 60L, 1L, 86_400L);
         final String adapterName = options.value("adapter-name", "ctp");
         if (!adapterName.matches("[a-z0-9][a-z0-9-]{0,31}"))
         {
@@ -589,7 +589,7 @@ public final class AeronMvp
         final String aeronDir = options.required("aeron-dir");
         final long recordingId = options.longValue("recording-id", -1, 0, Long.MAX_VALUE);
         final int expectedCount = options.integer("expected-count", -1, 1, Integer.MAX_VALUE);
-        final long timeoutSeconds = options.longValue("timeout-seconds", 30, 1, 3600);
+        final long timeoutSeconds = options.longValue("timeout-seconds", 30, 1, 86_400);
         final Path summaryFile = options.optionalPath("summary-file");
         final Path progressFile = options.optionalPath("progress-file");
         final long progressIntervalMs = options.longValue("progress-interval-ms", 500, 100, 60_000);
@@ -1237,7 +1237,7 @@ public final class AeronMvp
         private final MessageHeaderDecoder headerDecoder = new MessageHeaderDecoder();
         private final MarketQuoteDecoder quoteDecoder = new MarketQuoteDecoder();
         private final Set<String> sessions = new HashSet<>();
-        private final double[] latencyValues;
+        private final DoubleHistogram latencyHistogram = new DoubleHistogram(3);
         private final Map<Long, LatencyDistribution> latencyByTimeBin = new HashMap<>();
         private final Map<String, LatencyDistribution> latencyByInstrument = new HashMap<>();
         private final Map<String, LatencyDistribution> latencyBySource = new HashMap<>();
@@ -1270,7 +1270,6 @@ public final class AeronMvp
         {
             this.expectedCount = expectedCount;
             this.mode = mode;
-            this.latencyValues = mode == ConsumerMode.COMPUTE ? new double[expectedCount] : null;
         }
 
         private void onFragment(
@@ -1362,7 +1361,7 @@ public final class AeronMvp
                     return;
                 }
                 final double latencyMs = Math.abs(localReceiveNs - marketTimestampNs) / 1_000_000.0;
-                latencyValues[measured] = latencyMs;
+                latencyHistogram.recordValue(latencyMs);
                 measured++;
                 final double delta = latencyMs - mean;
                 mean += delta / measured;
@@ -1421,9 +1420,8 @@ public final class AeronMvp
                     elapsedNs);
             }
 
-            final double[] sorted = Arrays.copyOf(latencyValues, measured);
-            Arrays.sort(sorted);
-            final double p95 = measured == 0 ? 0 : sorted[(int)Math.ceil(measured * 0.95) - 1];
+            final double p95 = measured == 0 ? 0 :
+                Math.min(max, latencyHistogram.getValueAtPercentile(95.0));
             final double std = measured > 1 ? Math.sqrt(m2 / (measured - 1)) : 0;
             return new Summary(
                 mode,

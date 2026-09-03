@@ -1,0 +1,8 @@
+[Unit]
+Description=YDTrader continuous market-data stack
+Wants=ydtrader-market.service ydtrader-dashboard.service
+After=ydtrader-market.service ydtrader-dashboard.service
+StopWhenUnneeded=no
+
+[Install]
+WantedBy=default.target

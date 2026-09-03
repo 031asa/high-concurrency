@@ -1,0 +1,24 @@
+[Unit]
+Description=YDTrader dual CTP Aeron market-data pipeline
+After=network-online.target
+Wants=network-online.target
+PartOf=ydtrader-stack.target
+StartLimitIntervalSec=0
+
+[Service]
+Type=simple
+WorkingDirectory=@PROJECT_ROOT@
+ExecStart=/usr/bin/bash @PROJECT_ROOT@/scripts/run_dual_ctp_service.sh
+Restart=always
+RestartSec=15
+KillMode=control-group
+TimeoutStopSec=45
+UMask=0027
+NoNewPrivileges=true
+PrivateTmp=true
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=ydtrader-market
+
+[Install]
+WantedBy=ydtrader-stack.target

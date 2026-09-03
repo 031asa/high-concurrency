@@ -91,6 +91,43 @@ RUN_COMPILED_ENTRYPOINT_TEST=1 python -m pytest -q tests/test_unified_entrypoint
 本次仅完成入口和调用链适配；`product.toml` 的跨包保护范围、Java 构建期产物和
 CTP 运行环境仍需后续适配，不能据此认定当前整仓已通过 Web 加密镜像构建。
 
+### 双 CTP 常驻服务
+
+长期运行入口同时连接 `CTP-TTS-7X24` 与 `CTP-LIVE-5LEVEL`。两个 Bridge 独立接入，
+Dashboard 分来源展示行情、五档盘口与延迟；Aeron、Archive、Compute/Audit 仍按同一运行批次统计。
+
+```bash
+bash scripts/ydtrader_stack.sh install-start
+bash scripts/ydtrader_stack.sh status
+bash scripts/ydtrader_stack.sh logs
+```
+
+该命令把 user-systemd 单元安装到 `~/.config/systemd/user/`，并启用：
+
+- `ydtrader-market.service`：双 CTP 行情、Aeron、Archive 与计算审计链路；异常退出自动重启。
+- `ydtrader-dashboard.service`：`http://127.0.0.1:8080/`；异常退出自动重启。
+- `ydtrader-stack.target`：统一启动和停止上述两个服务。
+
+日常操作：
+
+```bash
+bash scripts/ydtrader_stack.sh start
+bash scripts/ydtrader_stack.sh restart
+bash scripts/ydtrader_stack.sh stop
+```
+
+Windows 桌面入口来自 `deploy/windows/start-ydtrader-dashboard.cmd`。它只调用统一管理脚本，
+不会复制业务逻辑，并启动隐藏的 WSL 保活客户端（同一项目重复点击只保留一份）。仅启用 systemd
+不能防止 WSL 空闲退出；`ydtrader_stack.sh stop` 后保活客户端会自动退出。
+Windows 关机、休眠或显式执行 `wsl --shutdown` 仍会中断接收；恢复后点击桌面入口重新启动。
+TTS 6.7.11 使用主循环中间隔 200ms 的逐合约订阅，避免批量/连续快速订阅不回调；官方 CTP 保持批量订阅。
+订阅确认不等于行情到达，应检查 `FORWARDING`、Compute 接收数和市场时间是否持续变化。
+两份非敏感行情源配置位于 `config/market-sources/ctp-tts-7x24.json` 和
+`config/market-sources/ctp-live-5level.json`；每个来源的合约、前置与超时均可独立调整。
+当前回放源仅配置已验证回调的 IF2609、IC2609、IH2609、IM2609、au2612、ag2612；
+实盘源保留原 11 个合约，不将实盘合约列表直接套给回放源。2026-09-03 验证中，加入 cu2610
+及后续未验证合约会出现该连接停止更新；新增回放合约前须单独确认回调和持续增长。
+
 ## 业务命令
 
 源码模式：

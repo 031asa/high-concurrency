@@ -1,0 +1,12 @@
+{
+  "schema_version": 1,
+  "name": "ctp-tts-7x24",
+  "kind": "ctp",
+  "enabled": true,
+  "front": "tcp://118.184.178.137:30011",
+  "api_kind": "tts",
+  "latency_mode": "historical_replay",
+  "instruments": ["IF2609", "IC2609", "IH2609", "IM2609", "au2612", "ag2612"],
+  "repeat": 1,
+  "source_timeout_seconds": 86400
+}
