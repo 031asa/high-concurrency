@@ -77,7 +77,7 @@ def build_packet(sequence: int, repeat: int, instrument: str) -> bytes:
     )
 
 
-def main() -> int:
+def main(argv=None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--udp-host", default="127.0.0.1")
     parser.add_argument("--udp-port", type=int, required=True)
@@ -85,7 +85,7 @@ def main() -> int:
     parser.add_argument("--repeat", type=int, default=1_000)
     parser.add_argument("--instrument", default="IC2609")
     parser.add_argument("--interval-ms", type=float, default=1.0)
-    args = parser.parse_args()
+    args = parser.parse_args(argv)
     if args.count < 1 or args.repeat < 1:
         parser.error("--count and --repeat must be positive")
 

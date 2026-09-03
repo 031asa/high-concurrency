@@ -125,7 +125,7 @@ if [[ "${#source_config_files[@]}" -gt 0 ]]; then
     source_config_mode=independent
     normalized_configs=$(mktemp)
     config_command=(
-        "$python_bin" "$MVP_DIR/source_config.py"
+        "$python_bin" "$PROJECT_ROOT/scripts/ydtrader.py" source-config
         --project-root "$PROJECT_ROOT"
     )
     for config_path in "${source_config_files[@]}"; do
@@ -405,7 +405,7 @@ declare -a mux_args=()
 for index in "${!source_names[@]}"; do
     mux_args+=(--input "${source_names[$index]}=$((base_udp_port + index + 1))")
 done
-"$python_bin" "$MVP_DIR/multi_source_mux.py" \
+"$python_bin" "$PROJECT_ROOT/scripts/ydtrader.py" multi-source-mux \
     "${mux_args[@]}" --output-port "$base_udp_port" \
     --count-per-source "$count" --source-timeout-seconds "$source_timeout" \
     --ready-file "$mux_ready_file" >"$run_dir/mux.log" 2>&1 &
@@ -455,18 +455,18 @@ for index in "${!source_names[@]}"; do
     name=${source_names[$index]}
     port=$((base_udp_port + index + 1))
     if [[ "$kind" == synthetic ]]; then
-        "$python_bin" "$MVP_DIR/synthetic_bridge.py" \
+        "$python_bin" "$PROJECT_ROOT/scripts/ydtrader.py" synthetic-bridge \
             --udp-port "$port" --count "$count" --repeat "${source_repeats[$index]}" \
             --instrument "${source_instruments[$index]}" >"$run_dir/$name-bridge.log" 2>&1 &
     elif [[ "$kind" == ctp ]]; then
         LOCPATH="${source_ctp_locale_roots[$index]}" \
-        "${source_pythons[$index]}" "$MVP_DIR/ctp_bridge.py" \
+        "${source_pythons[$index]}" "$PROJECT_ROOT/scripts/ydtrader.py" ctp-bridge \
             --front "${source_fronts[$index]}" --instruments "${source_instrument_lists[$index]}" \
             --udp-host 127.0.0.1 --udp-port "$port" --repeat "${source_repeats[$index]}" \
             --flow-path "$control_dir/$name-ctp-flow" \
             --idle-timeout-seconds "${source_idle_timeouts[$index]}" >"$run_dir/$name-bridge.log" 2>&1 &
     else
-        "${source_pythons[$index]}" "$MVP_DIR/ydapi_bridge.py" \
+        "${source_pythons[$index]}" "$PROJECT_ROOT/scripts/ydtrader.py" ydapi-bridge \
             --instrument "${source_instruments[$index]}" \
             --account-config "${source_account_configs[$index]}" --api-config "${source_api_configs[$index]}" \
             --udp-host 127.0.0.1 --udp-port "$port" --repeat "${source_repeats[$index]}" \

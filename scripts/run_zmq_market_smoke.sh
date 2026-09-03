@@ -86,7 +86,7 @@ for _ in $(seq 1 200); do
 done
 [[ -f "$ready_file" ]] || { printf 'Aeron server readiness timed out\n' >&2; exit 1; }
 
-"$python_bin" "$MVP_DIR/zmq_market_probe.py" \
+"$python_bin" "$PROJECT_ROOT/scripts/ydtrader.py" zmq-probe \
     --endpoint "$live_endpoint" \
     --expected-count "$count" \
     --summary-file "$run_dir/live.summary.json" \
@@ -120,7 +120,7 @@ wait "$probe_pid"
 probe_pid=
 recording_id=$(tr -d '[:space:]' <"$recording_file")
 
-"$python_bin" "$MVP_DIR/zmq_market_probe.py" \
+"$python_bin" "$PROJECT_ROOT/scripts/ydtrader.py" zmq-probe \
     --endpoint "$replay_endpoint" \
     --expected-count "$count" \
     --summary-file "$run_dir/replay.summary.json" \

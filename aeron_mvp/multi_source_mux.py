@@ -193,7 +193,7 @@ def run(args: argparse.Namespace) -> int:
         output.close()
 
 
-def parse_args() -> argparse.Namespace:
+def parse_args(argv=None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--input", action="append", required=True, help="source=UDP_PORT")
     parser.add_argument("--bind-host", default="127.0.0.1")
@@ -202,7 +202,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--count-per-source", type=int, required=True)
     parser.add_argument("--source-timeout-seconds", type=float, default=60.0)
     parser.add_argument("--ready-file", type=Path, required=True)
-    args = parser.parse_args()
+    args = parser.parse_args(argv)
     if not 1 <= args.output_port <= 65535:
         parser.error("--output-port must be between 1 and 65535")
     if args.count_per_source < 1:
@@ -216,8 +216,8 @@ def parse_args() -> argparse.Namespace:
     return args
 
 
-def main() -> int:
-    return run(parse_args())
+def main(argv=None) -> int:
+    return run(parse_args(argv))
 
 
 if __name__ == "__main__":

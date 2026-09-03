@@ -45,16 +45,22 @@ mkdir -p \
     "$STAGE_DIST/aeron_mvp/schema" \
     "$STAGE_DIST/config/market-sources" \
     "$STAGE_DIST/dashboard" \
+    "$STAGE_DIST/ydcore" \
     "$STAGE_DIST/licenses" \
     "$STAGE_DIST/scripts" \
     "$STAGE_DIST/utils" \
     "$STAGE_DIST/vendor/wheels"
 
 bash "$SCRIPT_DIR/build.sh"
+# Runtime Shell launchers now invoke the shared Python dispatcher.
+cp -a "$PROJECT_ROOT/scripts/ydtrader.py" "$STAGE_DIST/scripts/ydtrader.py"
+cp -a "$PROJECT_ROOT/ydcore/"*.py "$STAGE_DIST/ydcore/"
+cp -a "$SCRIPT_DIR/__init__.py" "$STAGE_DIST/aeron_mvp/__init__.py"
 cp -a "$SCRIPT_DIR/build/classes" "$STAGE_DIST/aeron_mvp/build/classes"
 cp -a "$SCRIPT_DIR/run_java.sh" "$STAGE_DIST/aeron_mvp/run_java.sh"
 cp -a "$SCRIPT_DIR/env.sh" "$STAGE_DIST/aeron_mvp/env.sh"
 cp -a "$SCRIPT_DIR/ctp_bridge.py" "$STAGE_DIST/aeron_mvp/ctp_bridge.py"
+cp -a "$SCRIPT_DIR/ctp_cli.py" "$STAGE_DIST/aeron_mvp/ctp_cli.py"
 cp -a "$SCRIPT_DIR/ydapi_bridge.py" "$STAGE_DIST/aeron_mvp/ydapi_bridge.py"
 cp -a "$SCRIPT_DIR/multi_source_mux.py" "$STAGE_DIST/aeron_mvp/multi_source_mux.py"
 cp -a "$SCRIPT_DIR/source_config.py" "$STAGE_DIST/aeron_mvp/source_config.py"

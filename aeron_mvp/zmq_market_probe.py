@@ -9,7 +9,11 @@ from pathlib import Path
 
 import zmq
 
-from market_wire import SbeDecodeError, TOPIC, decode_market_quote
+if __package__:
+    from .market_wire import SbeDecodeError, TOPIC, decode_market_quote
+else:
+    # Compatibility for direct source-file execution; packaged workers use the dispatcher.
+    from market_wire import SbeDecodeError, TOPIC, decode_market_quote
 
 
 def build_summary(first, last, count: int) -> dict:
@@ -60,12 +64,12 @@ def receive(endpoint: str, expected_count: int) -> list[dict]:
     return received
 
 
-def main() -> int:
+def main(argv=None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--endpoint", required=True)
     parser.add_argument("--expected-count", required=True, type=int)
     parser.add_argument("--summary-file", required=True, type=Path)
-    args = parser.parse_args()
+    args = parser.parse_args(argv)
     if args.expected_count < 1:
         parser.error("--expected-count must be positive")
     if not args.endpoint.startswith("tcp://"):

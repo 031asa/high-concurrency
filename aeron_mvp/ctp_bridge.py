@@ -15,6 +15,11 @@ from pathlib import Path
 
 from openctp_ctp import thostmduserapi as mdapi
 
+if __package__:
+    from .ctp_cli import parse_args
+else:
+    from ctp_cli import parse_args
+
 
 PACKET_V2 = struct.Struct("!IHHIQQQd" + "ddqq" * 5 + "32s16s32s")
 PACKET = struct.Struct(
@@ -201,30 +206,7 @@ class CtpMarketBridge(mdapi.CThostFtdcMdSpi):
             )
 
 
-def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--front", default="tcp://trading.openctp.cn:30011")
-    parser.add_argument("--instruments", required=True)
-    parser.add_argument("--udp-host", default="127.0.0.1")
-    parser.add_argument("--udp-port", type=int, default=24001)
-    parser.add_argument("--repeat", type=int, default=10_000)
-    parser.add_argument("--flow-path", required=True)
-    parser.add_argument("--idle-timeout-seconds", type=float, default=60.0)
-    args = parser.parse_args()
-    args.instruments = [item.strip() for item in args.instruments.split(",") if item.strip()]
-    if not args.instruments:
-        parser.error("--instruments must contain at least one contract")
-    if not 1 <= args.udp_port <= 65535:
-        parser.error("--udp-port must be between 1 and 65535")
-    if not 1 <= args.repeat <= 1_000_000:
-        parser.error("--repeat must be between 1 and 1000000")
-    if args.idle_timeout_seconds <= 0:
-        parser.error("--idle-timeout-seconds must be positive")
-    return args
-
-
-def main() -> int:
-    args = parse_args()
+def run(args: argparse.Namespace) -> int:
     bridge = CtpMarketBridge(args)
 
     def stop_handler(signum, frame) -> None:
@@ -248,6 +230,10 @@ def main() -> int:
         return 1
     print(f"CTP_BRIDGE result=SUCCESS source_ticks={bridge.sequence}", flush=True)
     return 0
+
+
+def main(argv=None) -> int:
+    return run(parse_args(argv))
 
 
 if __name__ == "__main__":

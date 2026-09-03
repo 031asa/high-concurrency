@@ -1,14 +1,11 @@
-import importlib
 import struct
-import sys
 from pathlib import Path
+
+from aeron_mvp import market_wire, zmq_market_probe
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 MVP_DIR = PROJECT_ROOT / "aeron_mvp"
-sys.path.insert(0, str(MVP_DIR))
-market_wire = importlib.import_module("market_wire")
-zmq_market_probe = importlib.import_module("zmq_market_probe")
 
 
 def _var_string(value):

@@ -204,7 +204,7 @@ def create_api(listener: YdApiListener, account: str, password: str, api_config:
     return YDApi(listener, account, password, api_config)
 
 
-def parse_args() -> argparse.Namespace:
+def parse_args(argv=None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--instrument", required=True)
     parser.add_argument("--account-config", required=True)
@@ -214,7 +214,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--repeat", type=int, default=10_000)
     parser.add_argument("--startup-timeout-seconds", type=float, default=60.0)
     parser.add_argument("--idle-timeout-seconds", type=float, default=60.0)
-    args = parser.parse_args()
+    args = parser.parse_args(argv)
     if not 1 <= args.udp_port <= 65535:
         parser.error("--udp-port must be between 1 and 65535")
     if not 1 <= args.repeat <= 1_000_000:
@@ -224,8 +224,8 @@ def parse_args() -> argparse.Namespace:
     return args
 
 
-def main() -> int:
-    args = parse_args()
+def main(argv=None) -> int:
+    args = parse_args(argv)
     account, password = load_account(args.account_config)
     publisher = YdApiUdpPublisher(args.udp_host, args.udp_port, args.repeat)
     listener = YdApiListener(publisher)

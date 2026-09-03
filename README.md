@@ -55,6 +55,42 @@ bash scripts/run_dashboard.sh
 共享参数模式仅为兼容既有命令而保留。YDApi/CTP 数据源的准确参数和验收方式见
 `aeron_mvp/README.md`，授时与行情延迟操作见 `README_授时与行情延迟操作手册.md`。
 
+### Python 统一入口（源码/扩展模块共用）
+
+在上述 Conda 环境中，推荐通过同一个参数入口启动：
+
+```bash
+python scripts/ydtrader.py --help
+python scripts/ydtrader.py aeron --help
+python scripts/ydtrader.py multi-source \
+  --source-config \
+    config/market-sources/synthetic-sim-a.json \
+    config/market-sources/synthetic-sim-b.json \
+  --count 1000
+# 另一个终端启动 Dashboard；不会自动连接柜台。
+python scripts/ydtrader.py dashboard --host 127.0.0.1 --port 8080
+```
+
+- `aeron` / `multi-source` 以 `exec` 交给原 Shell 调度，保留原参数、退出码及信号清理逻辑；
+  Dashboard 独立运行，原 `order`、`monitor`、`marketdata` 命令不变。
+- Shell 内的 Python 子进程统一调用此入口的 `source-config`、`multi-source-mux`、
+  `synthetic-bridge`、`ctp-bridge`、`ydapi-bridge`、`zmq-probe` 命令，
+  不再通过文件路径执行业务 `.py`。业务模块提供 `main(argv)`，支持编译为 `.so` 后导入调用。
+- 顶层帮助不会导入业务模块。CTP 命令先解析参数，再加载原生 SDK，
+  因此 `python scripts/ydtrader.py ctp-bridge --help` 不需要准备 locale 或连接柜台。
+- CTP 正式/TTS 仍使用原配置选择的独立解释器；本次没有合并环境、修改原生库或迁移可写目录。
+
+扩展模块验收（只使用本机模拟 UDP 行情与 HTTP，不登录柜台）：
+
+```bash
+python -m pytest -q
+RUN_COMPILED_ENTRYPOINT_TEST=1 python -m pytest -q tests/test_unified_entrypoint.py
+```
+
+第二条命令在临时目录编译模块、删除其对应 `.py` 后对照输出并运行模拟行情与 Dashboard。
+本次仅完成入口和调用链适配；`product.toml` 的跨包保护范围、Java 构建期产物和
+CTP 运行环境仍需后续适配，不能据此认定当前整仓已通过 Web 加密镜像构建。
+
 ## 业务命令
 
 源码模式：
