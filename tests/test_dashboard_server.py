@@ -75,6 +75,26 @@ class DashboardStatusTests(unittest.TestCase):
         self.assertEqual("IDLE", missing["dashboard_status"])
         self.assertEqual("openctp", missing["source_selection"]["requested"])
 
+    def test_multi_source_run_exposes_its_connected_source_list(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            run = root / "20260104T000000Z-4"
+            run.mkdir()
+            (run / "run.meta").write_text(
+                "run_id=multi-run\nsource=multi\nsources=ctp-live,ydapi\n"
+                "latency_mode=mixed\nstatus=RUNNING\n",
+                encoding="utf-8",
+            )
+
+            status = collect_status(root)
+
+        self.assertEqual(["ctp-live", "ydapi"], status["run"]["sources"])
+        option = status["source_selection"]["available"][0]
+        self.assertEqual("multi", option["value"])
+        self.assertEqual("MULTI (CTP-LIVE + YDAPI)", option["label"])
+        self.assertEqual(["ctp-live", "ydapi"], option["sources"])
+        self.assertFalse(status["market_observation"]["valid_for_live_observation"])
+
     def test_latest_run_merges_progress_and_final_summary(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

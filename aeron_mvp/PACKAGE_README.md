@@ -1,4 +1,4 @@
-# YDTrader Aeron MVP Java 0.7.1
+# YDTrader Aeron MVP Java 0.8.0
 
 这是 Linux x86_64 自包含验收包，内含精简 Java 17 运行时、Aeron 1.51.0、已编译
 SBE codec 和行情 MVP。目标机不需要安装 Java，也不需要联网下载依赖。
@@ -6,8 +6,8 @@ SBE codec 和行情 MVP。目标机不需要安装 Java，也不需要联网下�
 ## 快速验收
 
 ```bash
-tar -xzf ydtrader-aeron-mvp-java-0.7.1-linux-x86_64.tar.gz
-cd ydtrader-aeron-mvp-java-0.7.1-linux-x86_64
+tar -xzf ydtrader-aeron-mvp-java-0.8.0-linux-x86_64.tar.gz
+cd ydtrader-aeron-mvp-java-0.8.0-linux-x86_64
 sha256sum -c manifest.sha256
 bash scripts/run_aeron_mvp.sh --count 100000 --sync-level 0
 ```
@@ -33,6 +33,22 @@ bash scripts/run_aeron_mvp.sh --count 100000 --sync-level 1
 ```
 
 运行结果和 recording 保存在包内 `result/aeron-mvp/<run-id>/`。
+
+## 多行情源同时接入
+
+`--sources` 接受逗号分隔的 `<类型>[:来源名]` 列表，当前类型为 `synthetic`、`ctp`、
+`ydapi`。下面的离线命令同时启动两个模拟源：
+
+```bash
+bash scripts/run_multi_source_aeron_mvp.sh \
+  --sources synthetic:sim-a,synthetic:sim-b \
+  --count 1000
+```
+
+真实源可组合为 `--sources ctp:ctp-tts,ydapi:ydapi-main`，并通过 `--ctp-python` 和
+`--ydapi-python` 指向各自隔离的 Conda runtime。`--count` 按每个源计算。每个源独立校验输入
+sequence，合并后共用一条全局 sequence、一份 Archive recording 和一个 ZMQ 出口；任一源失败
+都会令验收失败。多源 mux、bridge 和下游项目互不导入对方源码。
 
 ## 通用 ZMQ/SBE 行情出口
 

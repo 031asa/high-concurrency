@@ -3,7 +3,7 @@ set -euo pipefail
 
 SCRIPT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
 PROJECT_ROOT=$(cd -- "$SCRIPT_DIR/.." && pwd)
-VERSION=0.7.1
+VERSION=0.8.0
 PLATFORM=linux-x86_64
 DIST_NAME="ydtrader-aeron-mvp-java-${VERSION}-${PLATFORM}"
 RESULT_DIR="$PROJECT_ROOT/result"
@@ -56,12 +56,16 @@ cp -a "$SCRIPT_DIR/run_java.sh" "$STAGE_DIST/aeron_mvp/run_java.sh"
 cp -a "$SCRIPT_DIR/env.sh" "$STAGE_DIST/aeron_mvp/env.sh"
 cp -a "$SCRIPT_DIR/ctp_bridge.py" "$STAGE_DIST/aeron_mvp/ctp_bridge.py"
 cp -a "$SCRIPT_DIR/ydapi_bridge.py" "$STAGE_DIST/aeron_mvp/ydapi_bridge.py"
+cp -a "$SCRIPT_DIR/multi_source_mux.py" "$STAGE_DIST/aeron_mvp/multi_source_mux.py"
+cp -a "$SCRIPT_DIR/synthetic_bridge.py" "$STAGE_DIST/aeron_mvp/synthetic_bridge.py"
 cp -a "$SCRIPT_DIR/market_wire.py" "$STAGE_DIST/aeron_mvp/market_wire.py"
 cp -a "$SCRIPT_DIR/zmq_market_probe.py" "$STAGE_DIST/aeron_mvp/zmq_market_probe.py"
 cp -a "$SCRIPT_DIR/schema/market-data.xml" "$STAGE_DIST/aeron_mvp/schema/market-data.xml"
 cp -a "$AERON_JAR" "$STAGE_DIST/aeron_mvp/lib/aeron-all-1.51.0.jar"
 cp -a "$JEROMQ_JAR" "$STAGE_DIST/aeron_mvp/lib/jeromq-0.6.0.jar"
 cp -a "$PROJECT_ROOT/scripts/run_aeron_mvp.sh" "$STAGE_DIST/scripts/run_aeron_mvp.sh"
+cp -a "$PROJECT_ROOT/scripts/run_multi_source_aeron_mvp.sh" \
+    "$STAGE_DIST/scripts/run_multi_source_aeron_mvp.sh"
 cp -a "$PROJECT_ROOT/scripts/run_ctp_aeron_mvp.sh" "$STAGE_DIST/scripts/run_ctp_aeron_mvp.sh"
 cp -a "$PROJECT_ROOT/scripts/run_ctp_live_aeron_mvp.sh" "$STAGE_DIST/scripts/run_ctp_live_aeron_mvp.sh"
 cp -a "$PROJECT_ROOT/scripts/run_ydapi_aeron_mvp.sh" "$STAGE_DIST/scripts/run_ydapi_aeron_mvp.sh"
@@ -99,8 +103,11 @@ chmod 0755 \
     "$STAGE_DIST/aeron_mvp/env.sh" \
     "$STAGE_DIST/aeron_mvp/ctp_bridge.py" \
     "$STAGE_DIST/aeron_mvp/ydapi_bridge.py" \
+    "$STAGE_DIST/aeron_mvp/multi_source_mux.py" \
+    "$STAGE_DIST/aeron_mvp/synthetic_bridge.py" \
     "$STAGE_DIST/aeron_mvp/zmq_market_probe.py" \
     "$STAGE_DIST/scripts/run_aeron_mvp.sh" \
+    "$STAGE_DIST/scripts/run_multi_source_aeron_mvp.sh" \
     "$STAGE_DIST/scripts/run_ctp_aeron_mvp.sh" \
     "$STAGE_DIST/scripts/run_ctp_live_aeron_mvp.sh" \
     "$STAGE_DIST/scripts/run_ydapi_aeron_mvp.sh" \

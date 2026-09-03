@@ -67,9 +67,17 @@ public final class AeronMvp
     private static final int ADAPTER_PACKET_VERSION_V1 = 1;
     private static final int ADAPTER_PACKET_VERSION_V2 = 2;
     private static final int ADAPTER_PACKET_VERSION_V3 = 3;
+    private static final int ADAPTER_PACKET_VERSION_TAGGED = 4;
     private static final int ADAPTER_PACKET_SIZE_V1 = 156;
     private static final int ADAPTER_PACKET_SIZE_V2 = 284;
     private static final int ADAPTER_PACKET_SIZE_V3 = 462;
+    private static final int ADAPTER_SOURCE_WIDTH = 32;
+    private static final int ADAPTER_PACKET_SIZE_TAGGED_V1 =
+        ADAPTER_PACKET_SIZE_V1 + ADAPTER_SOURCE_WIDTH;
+    private static final int ADAPTER_PACKET_SIZE_TAGGED_V2 =
+        ADAPTER_PACKET_SIZE_V2 + ADAPTER_SOURCE_WIDTH;
+    private static final int ADAPTER_PACKET_SIZE_TAGGED_V3 =
+        ADAPTER_PACKET_SIZE_V3 + ADAPTER_SOURCE_WIDTH;
     private static final int ADAPTER_TIMESTAMP_VALID_FLAG = 1;
     private static final int MAX_DEPTH_LEVELS = 5;
     private static final int ADAPTER_MAX_REPEAT = 1_000_000;
@@ -325,7 +333,7 @@ public final class AeronMvp
         final UnsafeBuffer buffer = new UnsafeBuffer(ByteBuffer.allocateDirect(BUFFER_CAPACITY));
         final MessageHeaderEncoder headerEncoder = new MessageHeaderEncoder();
         final MarketQuoteEncoder quoteEncoder = new MarketQuoteEncoder();
-        final ByteBuffer packet = ByteBuffer.allocateDirect(ADAPTER_PACKET_SIZE_V3)
+        final ByteBuffer packet = ByteBuffer.allocateDirect(ADAPTER_PACKET_SIZE_TAGGED_V3)
             .order(ByteOrder.BIG_ENDIAN);
         final double[] bidPrices = new double[MAX_DEPTH_LEVELS];
         final double[] askPrices = new double[MAX_DEPTH_LEVELS];
@@ -390,7 +398,10 @@ public final class AeronMvp
                     final int packetSize = packet.remaining();
                     if (packetSize != ADAPTER_PACKET_SIZE_V1 &&
                         packetSize != ADAPTER_PACKET_SIZE_V2 &&
-                        packetSize != ADAPTER_PACKET_SIZE_V3)
+                        packetSize != ADAPTER_PACKET_SIZE_V3 &&
+                        packetSize != ADAPTER_PACKET_SIZE_TAGGED_V1 &&
+                        packetSize != ADAPTER_PACKET_SIZE_TAGGED_V2 &&
+                        packetSize != ADAPTER_PACKET_SIZE_TAGGED_V3)
                     {
                         throw new IllegalArgumentException(
                             "unexpected " + adapterName + " packet size: " + packetSize);
@@ -403,14 +414,22 @@ public final class AeronMvp
                     final long marketTimestampNs = packet.getLong();
                     final long localReceiveNs = packet.getLong();
                     final double lastPrice = packet.getDouble();
+                    final boolean tagged = version == ADAPTER_PACKET_VERSION_TAGGED;
+                    final boolean v1Layout = version == ADAPTER_PACKET_VERSION_V1 ||
+                        (tagged && packetSize == ADAPTER_PACKET_SIZE_TAGGED_V1);
+                    final boolean v2Layout = version == ADAPTER_PACKET_VERSION_V2 ||
+                        (tagged && packetSize == ADAPTER_PACKET_SIZE_TAGGED_V2);
+                    final boolean v3Layout = version == ADAPTER_PACKET_VERSION_V3 ||
+                        (tagged && packetSize == ADAPTER_PACKET_SIZE_TAGGED_V3);
                     Arrays.fill(bidPrices, 0);
                     Arrays.fill(askPrices, 0);
                     Arrays.fill(bidVolumes, 0);
                     Arrays.fill(askVolumes, 0);
                     final int depthLevels;
-                    if (version == ADAPTER_PACKET_VERSION_V1)
+                    if (v1Layout)
                     {
-                        if (packetSize != ADAPTER_PACKET_SIZE_V1)
+                        if (packetSize != (tagged ?
+                            ADAPTER_PACKET_SIZE_TAGGED_V1 : ADAPTER_PACKET_SIZE_V1))
                         {
                             throw new IllegalArgumentException(
                                 adapterName + " v1 packet size mismatch: " + packetSize);
@@ -421,11 +440,11 @@ public final class AeronMvp
                         bidVolumes[0] = packet.getLong();
                         askVolumes[0] = packet.getLong();
                     }
-                    else if (version == ADAPTER_PACKET_VERSION_V2 ||
-                        version == ADAPTER_PACKET_VERSION_V3)
+                    else if (v2Layout || v3Layout)
                     {
-                        final int expectedPacketSize = version == ADAPTER_PACKET_VERSION_V3 ?
-                            ADAPTER_PACKET_SIZE_V3 : ADAPTER_PACKET_SIZE_V2;
+                        final int expectedPacketSize = v3Layout ?
+                            (tagged ? ADAPTER_PACKET_SIZE_TAGGED_V3 : ADAPTER_PACKET_SIZE_V3) :
+                            (tagged ? ADAPTER_PACKET_SIZE_TAGGED_V2 : ADAPTER_PACKET_SIZE_V2);
                         if (packetSize != expectedPacketSize)
                         {
                             throw new IllegalArgumentException(
@@ -452,7 +471,7 @@ public final class AeronMvp
                             "invalid " + adapterName + " packet version=" + version);
                     }
                     marketFields.clear(adapterName);
-                    if (version == ADAPTER_PACKET_VERSION_V3)
+                    if (v3Layout)
                     {
                         marketFields.volume = packet.getLong();
                         marketFields.turnover = packet.getDouble();
@@ -475,11 +494,22 @@ public final class AeronMvp
                     final String instrument = readFixedUtf8(packet, 32);
                     final String tradingDay = readFixedUtf8(packet, 16);
                     final String marketTimestampRaw = readFixedUtf8(packet, 32);
-                    if (version == ADAPTER_PACKET_VERSION_V3)
+                    if (v3Layout)
                     {
                         marketFields.exchangeId = readFixedUtf8(packet, 16);
                         marketFields.actionDay = readFixedUtf8(packet, 16);
                         marketFields.updateTime = readFixedUtf8(packet, 16);
+                    }
+                    if (tagged)
+                    {
+                        final String taggedSource = readFixedUtf8(packet, ADAPTER_SOURCE_WIDTH);
+                        if (taggedSource.isEmpty() ||
+                            !taggedSource.matches("[a-z0-9][a-z0-9-]{0,30}"))
+                        {
+                            throw new IllegalArgumentException(
+                                "invalid tagged market source: " + taggedSource);
+                        }
+                        marketFields.source = taggedSource;
                     }
 
                     if (magic != ADAPTER_PACKET_MAGIC)
@@ -1138,6 +1168,7 @@ public final class AeronMvp
         private final double[] latencyValues;
         private final Map<Long, LatencyDistribution> latencyByTimeBin = new HashMap<>();
         private final Map<String, LatencyDistribution> latencyByInstrument = new HashMap<>();
+        private final Map<String, LatencyDistribution> latencyBySource = new HashMap<>();
         private long received;
         private long expectedSequence = 1;
         private long gaps;
@@ -1152,6 +1183,7 @@ public final class AeronMvp
         private String lastInstrument = "";
         private String lastTradingDay = "";
         private String lastMarketTimestampRaw = "";
+        private String lastSource = "";
         private double lastPrice;
         private int lastDepthLevels = 1;
         private final double[] lastBidPrices = new double[MAX_DEPTH_LEVELS];
@@ -1222,6 +1254,10 @@ public final class AeronMvp
             lastInstrument = quoteDecoder.instrument();
             lastTradingDay = quoteDecoder.tradingDay();
             lastMarketTimestampRaw = quoteDecoder.marketTimestampRaw();
+            quoteDecoder.exchangeId();
+            quoteDecoder.actionDay();
+            quoteDecoder.updateTime();
+            lastSource = quoteDecoder.source();
             hasQuote = true;
 
             if (mode == ConsumerMode.COMPUTE)
@@ -1251,6 +1287,9 @@ public final class AeronMvp
                     .record(latencyMs);
                 final String instrument = lastInstrument.isEmpty() ? "UNKNOWN" : lastInstrument;
                 latencyByInstrument.computeIfAbsent(instrument, key -> new LatencyDistribution())
+                    .record(latencyMs);
+                final String source = lastSource.isEmpty() ? "unknown" : lastSource;
+                latencyBySource.computeIfAbsent(source, key -> new LatencyDistribution())
                     .record(latencyMs);
             }
 
@@ -1321,14 +1360,16 @@ public final class AeronMvp
             final String depth = serializeDepth();
             final String latencyTimeBins = serializeTimeBinStats();
             final String latencyContracts = serializeContractStats();
+            final String latencySources = serializeSourceStats();
             final String quote = hasQuote ? String.format(
                 Locale.ROOT,
-                "{\"sequence\":%d,\"instrument\":\"%s\",\"trading_day\":\"%s\"," +
+                "{\"sequence\":%d,\"source\":\"%s\",\"instrument\":\"%s\",\"trading_day\":\"%s\"," +
                     "\"market_time\":\"%s\",\"last_price\":%.10f," +
                     "\"depth_levels\":%d,\"depth\":%s," +
                     "\"bid_price\":%.10f,\"bid_volume\":%d," +
                     "\"ask_price\":%.10f,\"ask_volume\":%d}",
                 lastQuoteSequence,
+                jsonEscape(lastSource),
                 jsonEscape(lastInstrument),
                 jsonEscape(lastTradingDay),
                 jsonEscape(lastMarketTimestampRaw),
@@ -1347,7 +1388,8 @@ public final class AeronMvp
                     "\"duplicates\":%d,\"invalid_timestamps\":%d," +
                     "\"mean_ms\":%.6f,\"std_ms\":%.6f,\"p95_ms\":null," +
                     "\"max_ms\":%.6f,\"latency_by_time\":%s," +
-                    "\"latency_by_contract\":%s,\"elapsed_seconds\":%.6f," +
+                    "\"latency_by_contract\":%s,\"latency_by_source\":%s," +
+                    "\"elapsed_seconds\":%.6f," +
                     "\"rate_per_second\":%.3f}%n",
                 System.currentTimeMillis(),
                 mode,
@@ -1366,6 +1408,7 @@ public final class AeronMvp
                 currentMax,
                 latencyTimeBins,
                 latencyContracts,
+                latencySources,
                 seconds,
                 rate);
         }
@@ -1400,6 +1443,23 @@ public final class AeronMvp
                 }
                 final String key = keys.get(index);
                 latencyByInstrument.get(key).appendJson(json, "contract", key);
+            }
+            return json.append(']').toString();
+        }
+
+        private String serializeSourceStats()
+        {
+            final List<String> keys = new ArrayList<>(latencyBySource.keySet());
+            keys.sort(String::compareTo);
+            final StringBuilder json = new StringBuilder(256).append('[');
+            for (int index = 0; index < keys.size(); index++)
+            {
+                if (index > 0)
+                {
+                    json.append(',');
+                }
+                final String key = keys.get(index);
+                latencyBySource.get(key).appendJson(json, "source", key);
             }
             return json.append(']').toString();
         }

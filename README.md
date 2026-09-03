@@ -42,10 +42,15 @@ python -m pytest -q
 
 ```bash
 bash scripts/run_aeron_mvp.sh --count 100000 --sync-level 0
+bash scripts/run_multi_source_aeron_mvp.sh \
+  --sources synthetic:sim-a,synthetic:sim-b \
+  --count 1000
 bash scripts/run_dashboard.sh
 ```
 
-YDApi/CTP 数据源的准确参数和验收方式见 `aeron_mvp/README.md`，授时与行情延迟操作见 `README_授时与行情延迟操作手册.md`。
+单源继续使用 `run_aeron_mvp.sh`；多源列表支持 `synthetic`、`ctp`、`ydapi` 任意组合并发接入，
+每项可命名为 `<类型>:<来源名>`。YDApi/CTP 数据源的准确参数和验收方式见
+`aeron_mvp/README.md`，授时与行情延迟操作见 `README_授时与行情延迟操作手册.md`。
 
 ## 业务命令
 

@@ -76,6 +76,39 @@ AERON_MVP_ACCEPTANCE result=SUCCESS ...
 AERON_MVP_ACCEPTANCE live_compute=SUCCESS live_audit=SUCCESS replay_match=YES
 ```
 
+## 多行情源同时接入
+
+`--sources` 是逗号分隔的可选列表，每项格式为 `<类型>[:来源名]`。类型目前支持
+`synthetic`、`ctp`、`ydapi`，来源名会写进每条 SBE 行情的 `source` 字段；来源名必须唯一。
+下面的本地命令会同时启动两个独立模拟源，每个源发布 1000 条：
+
+```bash
+bash scripts/run_multi_source_aeron_mvp.sh \
+  --sources synthetic:sim-a,synthetic:sim-b \
+  --count 1000
+```
+
+同时连接 OpenCTP 与 YDApi：
+
+```bash
+bash scripts/run_multi_source_aeron_mvp.sh \
+  --sources ctp:ctp-tts,ydapi:ydapi-main \
+  --count 1000000 \
+  --ctp-python result/ctp-tts-runtime/conda/bin/python \
+  --ctp-api-kind tts \
+  --ctp-latency-mode historical_replay \
+  --ydapi-python "$CONDA_PREFIX/bin/python"
+```
+
+`--count` 是每个源的目标条数，总条数等于来源数乘以该值。每个 bridge 使用独立 loopback
+UDP 端口和独立输入 sequence；轻量 mux 校验每个源没有缺口后，为合并流分配全局 sequence，
+再送入原有单一 Aeron publication、Archive recording、Compute/Audit 和 ZMQ 出口。任一源断流、
+缺包或提前退出都会让整次运行失败，不会静默降级。Dashboard 的行情源列表会显示该次运行连接的
+全部来源，进度快照同时包含 `latency_by_source`。
+
+这条入口只组合高并发项目已有的接入接口，不导入下游 hpquant 源码。部署时两个项目仍可分别
+打包，在服务器上通过高并发侧 ZMQ `PUSH` 与 hpquant 侧 `PULL` 连接。
+
 ## 通用 ZMQ/SBE 行情出口
 
 出口位于 Aeron 原始行情 stream 的独立消费支路，而不是 Compute/Audit 结果层。
@@ -246,6 +279,6 @@ OpenCTP 7x24 环境可能重放历史交易日，因此其 market timestamp 适�
 bash aeron_mvp/build_release.sh
 ```
 
-生成 `result/ydtrader-aeron-mvp-java-0.7.1-linux-x86_64.tar.gz`，包含精简 Java 17
+生成 `result/ydtrader-aeron-mvp-java-0.8.0-linux-x86_64.tar.gz`，包含精简 Java 17
 运行时、Aeron runtime 和 Dashboard 静态资源；核心验收无需预装 Java或联网下载依赖，
 Dashboard 和 Python bridge 需目标机安装 Miniconda，并按包内 `environment.yml` 创建环境。

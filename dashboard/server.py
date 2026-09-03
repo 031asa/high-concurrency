@@ -303,10 +303,15 @@ def _source_catalog(run_dirs: Iterable[Path]) -> List[Dict[str, Any]]:
         if source in seen:
             continue
         seen.add(source)
+        sources = [item for item in meta.get("sources", "").split(",") if item]
+        label = source.upper()
+        if source == "multi" and sources:
+            label = "MULTI (" + " + ".join(item.upper() for item in sources) + ")"
         catalog.append(
             {
                 "value": source,
-                "label": source.upper(),
+                "label": label,
+                "sources": sources,
                 "latest_run_id": meta.get("run_id", run_dir.name),
                 "latest_started_at_utc": meta.get("started_at_utc", ""),
             }
@@ -324,7 +329,12 @@ def _latest_run(run_dirs: Iterable[Path], source: Optional[str] = None) -> Optio
 def _consumer_payload(run_dir: Path, name: str) -> tuple[Dict[str, Any], List[Dict[str, Any]]]:
     rows = _read_progress(run_dir / f"{name}-live.ndjson")
     current: Dict[str, Any] = dict(rows[-1]) if rows else {}
-    retained_fields = ("quote", "latency_by_time", "latency_by_contract")
+    retained_fields = (
+        "quote",
+        "latency_by_time",
+        "latency_by_contract",
+        "latency_by_source",
+    )
     for row in reversed(rows):
         for field in retained_fields:
             if field not in current and field in row:
@@ -367,6 +377,7 @@ def collect_status(result_root: Path, source: Optional[str] = None) -> Dict[str,
     run = {
         "id": meta.get("run_id", run_dir.name),
         "source": meta.get("source", "unknown"),
+        "sources": [item for item in meta.get("sources", "").split(",") if item],
         "latency_mode": meta.get("latency_mode", "live"),
         "expected_count": int(meta.get("expected_count", compute.get("expected", 0)) or 0),
         "sync_level": int(meta.get("sync_level", 0) or 0),
@@ -392,7 +403,7 @@ def collect_status(result_root: Path, source: Optional[str] = None) -> Dict[str,
     for point in series:
         point["observed_delta_ms"] = point.get("mean_ms")
     latency_mode = run["latency_mode"]
-    historical = latency_mode == "historical_replay"
+    historical = latency_mode in {"historical_replay", "mixed"}
     market_observation = {
         "status": "HISTORICAL" if historical else ("SYNTHETIC" if run["source"] == "synthetic" else "LIVE"),
         "valid_for_live_observation": not historical,
