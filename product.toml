@@ -43,7 +43,7 @@ dashboard = ["server"]
 
 [container]
 base_image = "ubuntu:24.04"
-builder_image = "continuumio/miniconda3:24.7.1-0"
+builder_image = "secure-release-builder-cn:24.7.1"
 runtime_packages = ["ca-certificates"]
 uid = 10001
 
