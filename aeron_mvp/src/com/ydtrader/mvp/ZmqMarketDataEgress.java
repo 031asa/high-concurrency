@@ -87,7 +87,7 @@ public final class ZmqMarketDataEgress
 
         try (ZContext context = new ZContext())
         {
-            final ZMQ.Socket socket = context.createSocket(SocketType.PUSH);
+            final ZMQ.Socket socket = context.createSocket(SocketType.PUB);
             socket.setLinger(0);
             socket.setSndHWM(sendHwm);
             socket.setSendTimeOut(sendTimeoutMs);

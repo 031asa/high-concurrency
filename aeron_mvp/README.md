@@ -116,20 +116,20 @@ UDP 端口和独立输入 sequence；轻量 mux 校验每个源没有缺口后�
 命令兼容使用；它们不能与 `--source-config` 混用。新部署应始终使用逐源配置模式。
 
 这条入口只组合高并发项目已有的接入接口，不导入下游 hpquant 源码。部署时两个项目仍可分别
-打包，在服务器上通过高并发侧 ZMQ `PUSH` 与 hpquant 侧 `PULL` 连接。
+打包，在服务器上通过高并发侧 ZMQ `PUB` 与 hpquant 侧 `SUB` 连接。
 
 ## 通用 ZMQ/SBE 行情出口
 
 出口位于 Aeron 原始行情 stream 的独立消费支路，而不是 Compute/Audit 结果层。
-`ZmqMarketDataEgress` 订阅 SBE v3 原帧，以 ZMQ `PUSH` 发送两帧消息：第一帧固定为
+`ZmqMarketDataEgress` 订阅 SBE v3 原帧，以 ZMQ `PUB` 发送两帧消息：第一帧固定为
 `snapshot`，第二帧是未改写的 SBE bytes。Aeron 继续负责 IPC 与 Archive，ZMQ 只承担跨进程
-TCP 边界；下游项目自行实现 `PULL`、协议解码和队列适配。
+TCP 边界；下游项目自行实现 `SUB`、协议解码和队列适配。
 
 ```bash
 bash scripts/run_zmq_market_smoke.sh 1000
 ```
 
-正式运行时先启动下游 `PULL`，再由多行情源主脚本同时编排 Media Driver 与 ZMQ 出口：
+正式运行时先启动下游 `SUB`，等待订阅建立后，再由多行情源主脚本同时编排 Media Driver 与 ZMQ 出口：
 
 ```bash
 bash scripts/run_multi_source_aeron_mvp.sh \
@@ -141,8 +141,9 @@ bash scripts/run_multi_source_aeron_mvp.sh \
 ```
 
 下游只需连接 `tcp://<high-concurrency-host>:7101`。高并发包不包含下游业务包、Python
-monkey patch、`sitecustomize` 或下游队列实现。任何发送超时或 sequence 缺口都会使进程失败；
-使用 checkpoint 和 Archive 的显式 `--mode replay --resume` 恢复，禁止静默跳过。
+monkey patch、`sitecustomize` 或下游队列实现。PUB/SUB 不缓存订阅建立前或订阅者断线期间的
+实时行情；下游以 sequence 检测缺口，并使用 checkpoint 和 Archive 的显式
+`--mode replay --resume` 恢复。
 `zmq-egress` 是 Aeron 客户端，不能脱离主脚本单独启动；主脚本会把本次运行实际使用的动态
 Aeron 目录传给它，不需要 `sudo`，也不得另写一个固定的 `/dev/shm` 目录。
 

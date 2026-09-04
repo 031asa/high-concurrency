@@ -32,9 +32,10 @@ def build_summary(first, last, count: int) -> dict:
 
 def receive(endpoint: str, expected_count: int) -> list[dict]:
     context = zmq.Context.instance()
-    socket = context.socket(zmq.PULL)
+    socket = context.socket(zmq.SUB)
     socket.setsockopt(zmq.LINGER, 0)
     socket.setsockopt(zmq.RCVHWM, 100_000)
+    socket.setsockopt(zmq.SUBSCRIBE, TOPIC)
     socket.connect(endpoint)
     received: list[dict] = []
     expected_by_session: dict[str, int] = {}
