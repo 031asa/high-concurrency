@@ -365,7 +365,7 @@ compute_pid=$!
 audit_pid=$!
 
 if [[ "$source" == ctp ]]; then
-    "$ctp_python" "$PROJECT_ROOT/scripts/ydtrader.py" ctp-bridge \
+    "$ctp_python" "$PROJECT_ROOT/main.py" ctp-bridge \
         --front "$ctp_front" \
         --instruments "$ctp_instruments" \
         --latency-mode "$ctp_latency_mode" \
@@ -377,7 +377,7 @@ if [[ "$source" == ctp ]]; then
         >"$run_dir/ctp-bridge.log" 2>&1 &
     bridge_pid=$!
 elif [[ "$source" == ydapi ]]; then
-    "$ydapi_python" "$PROJECT_ROOT/scripts/ydtrader.py" ydapi-bridge \
+    "$ydapi_python" "$PROJECT_ROOT/main.py" ydapi-bridge \
         --instrument "$ydapi_instrument" \
         --account-config "$ydapi_account_config" \
         --api-config "$ydapi_api_config" \

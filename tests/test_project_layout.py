@@ -11,6 +11,30 @@ def test_skill_layout_is_present():
     assert (PROJECT_ROOT / "data" / "error_code.csv").is_file()
 
 
+def test_root_main_is_the_only_python_launcher():
+    assert (PROJECT_ROOT / "main.py").is_file()
+    assert not (PROJECT_ROOT / "scripts" / "ydtrader.py").exists()
+    assert 'entrypoint = "main.py"' in (PROJECT_ROOT / "product.toml").read_text(
+        encoding="utf-8"
+    )
+
+
+def test_secure_release_builds_java_before_runtime():
+    prepare = (PROJECT_ROOT / "scripts" / "prepare_secure_release.sh").read_text(
+        encoding="utf-8"
+    )
+    runtime = (PROJECT_ROOT / "aeron_mvp" / "run_java.sh").read_text(
+        encoding="utf-8"
+    )
+    manifest = (PROJECT_ROOT / "product.toml").read_text(encoding="utf-8")
+    assert 'bash "$MVP_DIR/build.sh"' in prepare
+    assert "aeron-all-1.51.0.jar" in prepare
+    assert "jeromq-0.6.0.jar" in prepare
+    assert 'bash "$SCRIPT_DIR/build.sh"' not in runtime
+    assert 'prepare_commands = [["bash", "scripts/prepare_secure_release.sh"]]' in manifest
+    assert '"aeron_mvp/src"' in manifest
+
+
 def test_current_launchers_do_not_use_virtualenv_or_uv():
     launchers = [
         PROJECT_ROOT / "scripts" / "bootstrap_ctp_live.sh",

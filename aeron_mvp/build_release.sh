@@ -52,8 +52,8 @@ mkdir -p \
     "$STAGE_DIST/vendor/wheels"
 
 bash "$SCRIPT_DIR/build.sh"
-# Runtime Shell launchers now invoke the shared Python dispatcher.
-cp -a "$PROJECT_ROOT/scripts/ydtrader.py" "$STAGE_DIST/scripts/ydtrader.py"
+# Runtime Shell launchers invoke the only plaintext Python entrypoint.
+cp -a "$PROJECT_ROOT/main.py" "$STAGE_DIST/main.py"
 cp -a "$PROJECT_ROOT/ydcore/"*.py "$STAGE_DIST/ydcore/"
 cp -a "$SCRIPT_DIR/__init__.py" "$STAGE_DIST/aeron_mvp/__init__.py"
 cp -a "$SCRIPT_DIR/build/classes" "$STAGE_DIST/aeron_mvp/build/classes"

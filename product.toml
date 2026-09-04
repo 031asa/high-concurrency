@@ -2,7 +2,7 @@
 id = "ydtrader-high-concurrency"
 executable = "ydtrader"
 python_package = "ydcore"
-entrypoint = "scripts/ydtrader.py"
+entrypoint = "main.py"
 
 [paths]
 install_root = "/opt/ydtrader"
@@ -16,8 +16,30 @@ nuitka_include_modules = [
   "ydcore.marketdata",
   "ydcore.monitoring",
   "ydcore.trading",
+  "aeron_mvp.ctp_bridge",
+  "aeron_mvp.ctp_cli",
+  "aeron_mvp.market_wire",
+  "aeron_mvp.multi_source_mux",
+  "aeron_mvp.source_config",
+  "aeron_mvp.synthetic_bridge",
+  "aeron_mvp.ydapi_bridge",
+  "aeron_mvp.zmq_market_probe",
+  "dashboard.server",
 ]
 nuitka_include_packages = []
+
+[protection.packages]
+aeron_mvp = [
+  "ctp_bridge",
+  "ctp_cli",
+  "market_wire",
+  "multi_source_mux",
+  "source_config",
+  "synthetic_bridge",
+  "ydapi_bridge",
+  "zmq_market_probe",
+]
+dashboard = ["server"]
 
 [container]
 base_image = "ubuntu:24.04"
@@ -27,6 +49,17 @@ uid = 10001
 
 [build]
 environment_file = "environment.yml"
+prepare_commands = [["bash", "scripts/prepare_secure_release.sh"]]
+exclude_paths = [
+  "build_tools",
+  "scripts/prepare_secure_release.sh",
+  "aeron_mvp/bootstrap.sh",
+  "aeron_mvp/build.sh",
+  "aeron_mvp/build_release.sh",
+  "aeron_mvp/src",
+  "aeron_mvp/schema",
+  "aeron_mvp/build/generated",
+]
 
 [validation]
 args = ["--help"]

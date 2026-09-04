@@ -14,10 +14,10 @@ python -m pytest -q
 ## 二、验证业务入口
 
 ```bash
-python scripts/ydtrader.py --help
-python scripts/ydtrader.py order --help
-python scripts/ydtrader.py monitor --help
-python scripts/ydtrader.py marketdata --help
+python main.py --help
+python main.py order --help
+python main.py monitor --help
+python main.py marketdata --help
 ```
 
 这些命令不再读取许可证、不提示项目运行密码，也不会创建激活状态。连接 YDApi 时仍需在本机 `config/account.json` 提供柜台账号密码，并准备正确的 `ydClient.ini`。

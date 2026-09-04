@@ -5,11 +5,12 @@ SCRIPT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
 source "$SCRIPT_DIR/env.sh"
 
 if [[ ! -d "$SCRIPT_DIR/build/classes" ]]; then
-    bash "$SCRIPT_DIR/build.sh"
+    printf 'Aeron Java classes are missing; rebuild the image or release package.\n' >&2
+    exit 2
 fi
 
 if ! aeron_mvp_resolve_runtime_dependencies; then
-    aeron_mvp_print_dependency_help
+    printf 'Aeron runtime dependencies are missing from the package; rebuild it.\n' >&2
     exit 2
 fi
 

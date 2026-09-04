@@ -79,7 +79,7 @@ def main(argv=None):
         "--include-module=ydcore.monitoring",
         "--include-module=ydcore.marketdata",
         "--report=build/nuitka/build-report.xml",
-        "scripts/ydtrader.py",
+        "main.py",
     )
 
     dist = BUILD_ROOT / "nuitka" / "ydtrader.dist"

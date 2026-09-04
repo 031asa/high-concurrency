@@ -60,15 +60,15 @@ bash scripts/run_dashboard.sh
 在上述 Conda 环境中，推荐通过同一个参数入口启动：
 
 ```bash
-python scripts/ydtrader.py --help
-python scripts/ydtrader.py aeron --help
-python scripts/ydtrader.py multi-source \
+python main.py --help
+python main.py aeron --help
+python main.py multi-source \
   --source-config \
     config/market-sources/synthetic-sim-a.json \
     config/market-sources/synthetic-sim-b.json \
   --count 1000
 # 另一个终端启动 Dashboard；不会自动连接柜台。
-python scripts/ydtrader.py dashboard --host 127.0.0.1 --port 8080
+python main.py dashboard --host 127.0.0.1 --port 8080
 ```
 
 - `aeron` / `multi-source` 以 `exec` 交给原 Shell 调度，保留原参数、退出码及信号清理逻辑；
@@ -77,7 +77,7 @@ python scripts/ydtrader.py dashboard --host 127.0.0.1 --port 8080
   `synthetic-bridge`、`ctp-bridge`、`ydapi-bridge`、`zmq-probe` 命令，
   不再通过文件路径执行业务 `.py`。业务模块提供 `main(argv)`，支持编译为 `.so` 后导入调用。
 - 顶层帮助不会导入业务模块。CTP 命令先解析参数，再加载原生 SDK，
-  因此 `python scripts/ydtrader.py ctp-bridge --help` 不需要准备 locale 或连接柜台。
+  因此 `python main.py ctp-bridge --help` 不需要准备 locale 或连接柜台。
 - CTP 正式/TTS 仍使用原配置选择的独立解释器；本次没有合并环境、修改原生库或迁移可写目录。
 
 扩展模块验收（只使用本机模拟 UDP 行情与 HTTP，不登录柜台）：
@@ -143,10 +143,10 @@ Bridge/Mux/Publisher 的 UDP 序号缺口仍严格报错，不跳过缺口伪装
 源码模式：
 
 ```bash
-python scripts/ydtrader.py --help
-python scripts/ydtrader.py order --help
-python scripts/ydtrader.py monitor --help
-python scripts/ydtrader.py marketdata --help
+python main.py --help
+python main.py order --help
+python main.py monitor --help
+python main.py marketdata --help
 ```
 
 命令会直接进入相应业务模块，不再要求额外运行密码。真实报单仍必须遵守原有风控：先执行连接、查询、行情与 `checked=2` 验证；`--send`、策略身份、暂停标志、报单和撤单阈值仍然有效，未经负责人明确批准不得执行真实报单或撤单。

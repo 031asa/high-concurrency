@@ -18,7 +18,7 @@ from ydcore import launcher
 
 
 ROOT = Path(__file__).resolve().parents[1]
-ENTRY = ROOT / "scripts" / "ydtrader.py"
+ENTRY = ROOT / "main.py"
 
 
 @pytest.mark.parametrize("command,module_name", launcher.APPLICATION_MODULES.items())
@@ -75,7 +75,7 @@ def test_runtime_shell_scripts_only_call_shared_python_entry():
         "run_dashboard.sh", "run_zmq_market_smoke.sh",
     ):
         source = (ROOT / "scripts" / name).read_text()
-        assert '"$PROJECT_ROOT/scripts/ydtrader.py"' in source
+        assert '"$PROJECT_ROOT/main.py"' in source
         for module in launcher.APPLICATION_MODULES.values():
             assert module.rsplit(".", 1)[-1] + '.py"' not in source
         subprocess.run(["bash", "-n", str(ROOT / "scripts" / name)], check=True)
@@ -83,7 +83,7 @@ def test_runtime_shell_scripts_only_call_shared_python_entry():
 
 def test_aeron_source_release_carries_shared_entry_and_packages():
     source = (ROOT / "aeron_mvp" / "build_release.sh").read_text()
-    assert '"$PROJECT_ROOT/scripts/ydtrader.py"' in source
+    assert '"$PROJECT_ROOT/main.py"' in source
     assert '"$PROJECT_ROOT/ydcore/"*.py' in source
     assert '"$SCRIPT_DIR/__init__.py"' in source
     subprocess.run(["bash", "-n", str(ROOT / "aeron_mvp" / "build_release.sh")], check=True)
@@ -214,9 +214,8 @@ def test_compiled_modules_work_without_their_python_sources(tmp_path):
         for source in (ROOT / directory).iterdir():
             if source.suffix in {".py", ".html"}:
                 shutil.copy2(source, target / source.name)
-    (app / "scripts").mkdir()
-    shutil.copy2(ENTRY, app / "scripts" / ENTRY.name)
-    entry = app / "scripts" / ENTRY.name
+    shutil.copy2(ENTRY, app / ENTRY.name)
+    entry = app / ENTRY.name
     config = tmp_path / "source config.json"
     config.write_text(json.dumps({"schema_version": 1, "name": "sim-a", "kind": "synthetic", "instrument": "IC2609"}))
     commands = [["--help"], ["aeron", "--help"], ["multi-source", "--help"]]
