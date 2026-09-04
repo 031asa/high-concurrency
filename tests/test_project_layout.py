@@ -66,8 +66,20 @@ def test_manylinux_build_pins_are_mirrored_in_environment():
     requirements = (
         PROJECT_ROOT / "requirements-build.txt"
     ).read_text(encoding="utf-8").splitlines()
+    conda_managed = {
+        "setuptools==75.8.2": "setuptools=75.8.2",
+        "wheel==0.45.1": "wheel=0.45.1",
+    }
     for requirement in requirements:
-        assert f"- {requirement}" in environment
+        assert f"- {conda_managed.get(requirement, requirement)}" in environment
+
+
+def test_conda_pack_foundations_are_not_reinstalled_by_pip():
+    environment = (PROJECT_ROOT / "environment.yml").read_text(encoding="utf-8")
+    assert "\n  - setuptools=75.8.2\n" in environment
+    assert "\n  - wheel=0.45.1\n" in environment
+    assert "\n      - setuptools==" not in environment
+    assert "\n      - wheel==" not in environment
 
 
 def test_runtime_has_no_project_license_or_encryption_layer():

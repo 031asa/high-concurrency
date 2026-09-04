@@ -7,14 +7,16 @@ dependencies:
   - openjdk=17
   - pyzmq=26.4.0
   - pip
+  # Keep packaging foundations owned by Conda so conda-pack sees a
+  # consistent environment after pip installs the project dependencies.
+  - setuptools=75.8.2
+  - wheel=0.45.1
   - curl
   - unzip
   - pip:
       - Cython==3.0.12
       - Nuitka==2.7.12
       - pytest==8.3.5
-      - setuptools==75.8.2
-      - wheel==0.45.1
       - zstandard==0.23.0
       - openctp-ctp==6.7.11.0
       - ./vendor/wheels/pyyd-1.486.96.99-cp39-cp39-linux_x86_64.whl
