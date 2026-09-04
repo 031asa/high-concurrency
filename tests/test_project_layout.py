@@ -30,6 +30,7 @@ def test_secure_release_builds_java_before_runtime():
     assert 'bash "$MVP_DIR/build.sh"' in prepare
     assert "aeron-all-1.51.0.jar" in prepare
     assert "jeromq-0.6.0.jar" in prepare
+    assert '"$(readlink -f -- "$source")" == "$(readlink -f -- "$destination")"' in prepare
     assert 'bash "$SCRIPT_DIR/build.sh"' not in runtime
     assert 'prepare_commands = [["bash", "scripts/prepare_secure_release.sh"]]' in manifest
     assert '"aeron_mvp/src"' in manifest

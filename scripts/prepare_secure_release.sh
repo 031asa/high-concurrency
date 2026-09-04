@@ -15,8 +15,17 @@ aeron_mvp_resolve_runtime_dependencies || {
 }
 
 mkdir -p "$MVP_DIR/lib"
-cp -f -- "$AERON_JAR" "$MVP_DIR/lib/aeron-all-1.51.0.jar"
-cp -f -- "$JEROMQ_JAR" "$MVP_DIR/lib/jeromq-0.6.0.jar"
+copy_runtime_jar() {
+    local source=$1
+    local destination=$2
+    if [[ -e "$destination" \
+        && "$(readlink -f -- "$source")" == "$(readlink -f -- "$destination")" ]]; then
+        return 0
+    fi
+    cp -f -- "$source" "$destination"
+}
+copy_runtime_jar "$AERON_JAR" "$MVP_DIR/lib/aeron-all-1.51.0.jar"
+copy_runtime_jar "$JEROMQ_JAR" "$MVP_DIR/lib/jeromq-0.6.0.jar"
 test -f "$MVP_DIR/build/classes/com/ydtrader/mvp/AeronMvp.class"
 
 printf 'SECURE_RELEASE_PREPARE result=SUCCESS classes=%s runtime_jars=%s\n' \
