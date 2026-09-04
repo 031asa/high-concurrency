@@ -110,6 +110,14 @@ def _write_ready(path: Path) -> None:
     temporary.replace(path)
 
 
+def idle_timeout_message(state: InputState, timeout_seconds: float) -> str:
+    return (
+        f"source {state.spec.source} idle for {timeout_seconds:g} seconds after "
+        f"source_ticks={state.source_ticks} published={state.published} "
+        f"remaining={state.remaining}"
+    )
+
+
 def run(args: argparse.Namespace) -> int:
     specs = parse_input_specs(args.input)
     selector = selectors.DefaultSelector()
@@ -132,7 +140,8 @@ def run(args: argparse.Namespace) -> int:
             "MULTI_SOURCE_MUX state=READY "
             f"inputs={','.join(item.spec.source for item in states)} "
             f"output={args.output_host}:{args.output_port} "
-            f"count_per_source={args.count_per_source}",
+            f"count_per_source={args.count_per_source} "
+            f"idle_timeout_seconds={args.source_timeout_seconds:g}",
             flush=True,
         )
 
@@ -142,10 +151,7 @@ def run(args: argparse.Namespace) -> int:
             now = time.monotonic()
             for state in states:
                 if state.remaining and now - state.last_packet_at > args.source_timeout_seconds:
-                    raise TimeoutError(
-                        f"source {state.spec.source} produced no packet for "
-                        f"{args.source_timeout_seconds:g} seconds"
-                    )
+                    raise TimeoutError(idle_timeout_message(state, args.source_timeout_seconds))
             for key, _ in events:
                 state: InputState = key.data
                 packet, _ = state.socket.recvfrom(2048)

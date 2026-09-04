@@ -6,6 +6,8 @@ from aeron_mvp.multi_source_mux import HEADER
 from aeron_mvp.multi_source_mux import PACKET_SIZES
 from aeron_mvp.multi_source_mux import parse_input_specs
 from aeron_mvp.multi_source_mux import tag_packet
+from aeron_mvp.multi_source_mux import InputSpec, InputState
+from aeron_mvp.multi_source_mux import idle_timeout_message
 
 
 def packet(version: int, sequence: int = 7, repeat: int = 100) -> bytes:
@@ -53,3 +55,14 @@ def test_input_list_requires_unique_sources_and_ports():
         parse_input_specs(["ydapi=24001", "ydapi=24002"])
     with pytest.raises(ValueError, match="duplicate UDP port"):
         parse_input_specs(["ydapi=24001", "ctp=24001"])
+
+
+def test_idle_diagnostic_reports_progress():
+    state = InputState(InputSpec("ydapi-main", 24001), None, 99)
+    state.source_ticks = 1
+    state.published = 1
+
+    assert idle_timeout_message(state, 60) == (
+        "source ydapi-main idle for 60 seconds after "
+        "source_ticks=1 published=1 remaining=99"
+    )

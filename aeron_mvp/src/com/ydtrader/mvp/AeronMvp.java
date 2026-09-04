@@ -368,13 +368,15 @@ public final class AeronMvp
                 System.out.printf(
                     Locale.ROOT,
                     "AERON_MVP_ADAPTER_PUBLISHER state=WAITING recording_id=%d " +
-                        "adapter=%s session_id=%s bind=%s:%d count=%d%n",
+                        "adapter=%s session_id=%s bind=%s:%d count=%d " +
+                        "idle_timeout_seconds=%d%n",
                     recordingId,
                     adapterName,
                     sessionId,
                     bindHost,
                     udpPort,
-                    count);
+                    count,
+                    sourceTimeoutSeconds);
                 System.out.flush();
 
                 long lastPacketNs = System.nanoTime();
@@ -387,8 +389,10 @@ public final class AeronMvp
                             Duration.ofSeconds(sourceTimeoutSeconds).toNanos())
                         {
                             throw new IllegalStateException(
-                                "no valid " + adapterName + " packet received for " +
-                                    sourceTimeoutSeconds + " seconds");
+                                adapterName + " input idle for " + sourceTimeoutSeconds +
+                                    " seconds after source_ticks=" + sourceTicks +
+                                    " published=" + published +
+                                    " remaining=" + (count - published));
                         }
                         Thread.onSpinWait();
                         continue;

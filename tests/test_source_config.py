@@ -104,6 +104,27 @@ def test_ydapi_python_override_is_optional(tmp_path):
         (tmp_path / "config/account.json").resolve()
     )
     assert config["latency_mode"] == "live"
+    assert config["source_timeout_seconds"] == "86400"
+
+
+def test_real_sources_default_to_session_safe_idle_timeout(tmp_path):
+    config_path = write_config(
+        tmp_path / "ydapi.json",
+        {
+            "schema_version": 1,
+            "name": "ydapi-main",
+            "kind": "ydapi",
+            "account_config": "config/account.json",
+            "api_config": "config/ydClient.ini",
+            "instrument": "IF2609",
+        },
+    )
+
+    assert load_source_config(config_path, tmp_path)["source_timeout_seconds"] == "86400"
+
+    document = synthetic("sim-a")
+    synthetic_path = write_config(tmp_path / "synthetic.json", document)
+    assert load_source_config(synthetic_path, tmp_path)["source_timeout_seconds"] == "60"
 
 
 def test_rejects_duplicate_names(tmp_path):

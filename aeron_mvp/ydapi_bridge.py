@@ -282,7 +282,8 @@ def main(argv=None) -> int:
         subscribed = True
         print(
             "YDAPI_BRIDGE state=SUBSCRIBED "
-            f"account={mask_account(account)} instrument={args.instrument}",
+            f"account={mask_account(account)} instrument={args.instrument} "
+            f"idle_timeout_seconds={args.idle_timeout_seconds:g}",
             flush=True,
         )
         subscribed_at = time.monotonic()
@@ -292,7 +293,9 @@ def main(argv=None) -> int:
             reference = publisher.last_tick_monotonic if publisher.sequence else subscribed_at
             if time.monotonic() - reference > args.idle_timeout_seconds:
                 raise TimeoutError(
-                    f"no YDApi tick received for {args.idle_timeout_seconds:.0f} seconds"
+                    f"YDApi instrument {args.instrument} idle for "
+                    f"{args.idle_timeout_seconds:g} seconds after "
+                    f"source_ticks={publisher.sequence}"
                 )
     finally:
         if subscribed:

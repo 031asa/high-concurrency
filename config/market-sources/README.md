@@ -38,7 +38,10 @@ Common fields:
 - `kind`: `synthetic`, `ctp`, or `ydapi`.
 - `enabled`: optional boolean; disabled files are ignored.
 - `repeat`: source-packet expansion used for load tests; production should use `1`.
-- `source_timeout_seconds`: per-source idle timeout.
+- `source_timeout_seconds`: per-source idle timeout. Synthetic acceptance defaults to
+  `60`; CTP/YDApi defaults to `86400` so lunch breaks and overnight market closures do
+  not look like transport failures. Production may set an explicit value for its
+  trading calendar.
 
 CTP additionally requires `front`, `api_kind`, `latency_mode`, and a non-empty
 `instruments` array. Its optional `python` overrides the automatic

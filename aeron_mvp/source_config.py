@@ -149,7 +149,10 @@ def load_source_config(path: Path, project_root: Path) -> dict[str, str]:
         repeat=str(_integer(document.get("repeat", 1), "repeat", source, 1, 1_000_000)),
         source_timeout_seconds=str(
             _integer(
-                document.get("source_timeout_seconds", 60),
+                document.get(
+                    "source_timeout_seconds",
+                    60 if kind == "synthetic" else 86_400,
+                ),
                 "source_timeout_seconds",
                 source,
                 1,

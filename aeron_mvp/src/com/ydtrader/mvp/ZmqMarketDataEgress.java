@@ -100,10 +100,12 @@ public final class ZmqMarketDataEgress
             final Forwarder forwarder = new Forwarder(socket, checkpointFile, checkpointInterval);
             System.out.printf(
                 Locale.ROOT,
-                "ZMQ_MARKET_EGRESS state=STARTING mode=%s endpoint=%s expected=%d%n",
+                "ZMQ_MARKET_EGRESS state=STARTING mode=%s endpoint=%s expected=%d " +
+                    "idle_timeout_seconds=%d%n",
                 mode,
                 endpoint,
-                expectedCount);
+                expectedCount,
+                timeoutSeconds);
             System.out.flush();
             if ("live".equals(mode))
             {
@@ -208,7 +210,9 @@ public final class ZmqMarketDataEgress
                 if (System.nanoTime() - lastProgressNs > timeoutNs)
                 {
                     throw new IllegalStateException(
-                        "no Aeron market data received for " + timeoutSeconds + " seconds");
+                        "Aeron market data idle for " + timeoutSeconds +
+                            " seconds after sent=" + forwarder.sent +
+                            " expected=" + expectedCount);
                 }
                 Thread.onSpinWait();
             }
