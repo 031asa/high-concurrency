@@ -1,6 +1,7 @@
 import socket
 import unittest
 from datetime import datetime
+from unittest.mock import Mock
 from types import SimpleNamespace
 
 from aeron_mvp import ydapi_bridge
@@ -68,6 +69,31 @@ class YdApiAeronBridgeTests(unittest.TestCase):
         market_ns, valid = ydapi_bridge.market_timestamp_ns("23:59:59.995", received_ns)
         self.assertTrue(valid)
         self.assertEqual(received_ns - market_ns, 15_000_000)
+
+    def test_listener_ignores_catchup_callbacks_until_subscription_is_enabled(self):
+        publisher = Mock(sequence=0)
+        listener = ydapi_bridge.YdApiListener(publisher)
+        tick = SimpleNamespace(instrument="IF2609", timestamp="17:00:01.001")
+
+        listener.marketdata(tick)
+
+        publisher.publish.assert_not_called()
+        self.assertEqual(listener.ignored_callbacks, 1)
+
+    def test_listener_forwards_only_the_enabled_instrument(self):
+        publisher = Mock(sequence=1)
+        publisher.publish.return_value = True
+        listener = ydapi_bridge.YdApiListener(publisher)
+        listener.caughtup()
+        listener.enable_instrument("IF2609")
+        wrong = SimpleNamespace(instrument="IC2609", timestamp="09:30:00.000")
+        expected = SimpleNamespace(instrument="IF2609", timestamp="09:30:00.500")
+
+        listener.marketdata(wrong)
+        listener.marketdata(expected)
+
+        publisher.publish.assert_called_once()
+        self.assertIs(publisher.publish.call_args.args[0], expected)
 
 
 if __name__ == "__main__":

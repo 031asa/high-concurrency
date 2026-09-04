@@ -154,6 +154,8 @@ class YdApiListener:
         self.caughtup_event = threading.Event()
         self.failure_event = threading.Event()
         self.failure_message = ""
+        self.subscribed_instrument = None
+        self.ignored_callbacks = 0
 
     def login(self, error, max_order_ref, is_monitor) -> None:
         self.login_error = error
@@ -164,8 +166,29 @@ class YdApiListener:
         self.caughtup_event.set()
         print("YDAPI_BRIDGE state=CAUGHTUP", flush=True)
 
+    def enable_instrument(self, instrument: str) -> None:
+        self.subscribed_instrument = instrument
+
+    def disable_instrument(self) -> None:
+        self.subscribed_instrument = None
+
+    def marketdata_is_enabled(self, market_data) -> bool:
+        instrument = str(getattr(market_data, "instrument", "") or "")
+        return (
+            self.subscribed_instrument is not None
+            and instrument == self.subscribed_instrument
+        )
+
     def marketdata(self, market_data) -> None:
         received_ns = time.time_ns()
+        if not self.marketdata_is_enabled(market_data):
+            self.ignored_callbacks += 1
+            if self.ignored_callbacks == 1:
+                print(
+                    "YDAPI_BRIDGE state=IGNORING_PRE_SUBSCRIPTION_CALLBACKS",
+                    flush=True,
+                )
+            return
         if not self.publisher.publish(market_data, received_ns):
             self.failure_message = "non-blocking UDP send failed"
             self.failure_event.set()
@@ -250,7 +273,11 @@ def main(argv=None) -> int:
                 raise TimeoutError("waiting for YDApi caughtup timed out")
         if api.get_instrument(args.instrument) is None:
             raise ValueError(f"instrument not found in YDApi: {args.instrument}")
+        # Enable immediately before subscribe so a synchronous subscription callback
+        # is accepted, while startup/catch-up callbacks remain excluded.
+        listener.enable_instrument(args.instrument)
         if api.subscribe(args.instrument) is False:
+            listener.disable_instrument()
             raise RuntimeError(f"YDApi.subscribe() returned False: {args.instrument}")
         subscribed = True
         print(
@@ -273,6 +300,7 @@ def main(argv=None) -> int:
                 api.unsubscribe(args.instrument)
             except Exception as exc:
                 print(f"YDAPI_BRIDGE state=UNSUBSCRIBE_FAILED type={type(exc).__name__}", flush=True)
+        listener.disable_instrument()
         stop_api = getattr(api, "stop", None)
         if callable(stop_api):
             stop_api()

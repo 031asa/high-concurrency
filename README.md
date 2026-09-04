@@ -120,6 +120,8 @@ Windows 桌面入口来自 `deploy/windows/start-ydtrader-dashboard.cmd`。它�
 不会复制业务逻辑，并启动隐藏的 WSL 保活客户端（同一项目重复点击只保留一份）。仅启用 systemd
 不能防止 WSL 空闲退出；`ydtrader_stack.sh stop` 后保活客户端会自动退出。
 Windows 关机、休眠或显式执行 `wsl --shutdown` 仍会中断接收；恢复后点击桌面入口重新启动。
+YDApi 启动追赶阶段的缓存回调不会进入 Aeron；仅在 caughtup 后启用配置合约，
+并只转发该合约的正式订阅回调，避免 Dashboard 把 17:00 缓存快照当成实时行情。
 TTS 与官方 CTP 均使用主循环中间隔 500ms 的逐合约订阅，并保留原生请求缓冲区。
 2026-09-03 夜盘实测：指定实盘前置的批量订阅虽确认成功却没有行情，改用上述方式后收到当前夜盘行情；
 实盘 11 合约配置不变，不用历史回放替代实时源。夜盘交易日可能为次日，应结合 ActionDay 和 UpdateTime 验收。
