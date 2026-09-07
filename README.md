@@ -57,6 +57,18 @@ bash scripts/run_dashboard.sh
 
 ### Python 统一入口（源码/扩展模块共用）
 
+Dashboard 默认按北京时间自然日展示当前所选行情源的当天平均延迟、分位数、
+分时与分合约统计；另行保留该源的全会话总平均延迟及累计样本数（包含旧快照）。
+当天统计要求行情事件日期与本地回调接收日期一致，不使用 `TradingDay`，不按
+延迟大小剔除真实慢行情。跨日旧快照、未来日期、无效时间分别计数，归档数据不变。
+页面午夜自动切换当天视图；无当天样本时显示等待状态。旧运行缺少每日字段时
+显示“该运行未提供当天统计”，仍可查看其全会话均值。
+Compute 在 `source_views[].daily_latency` 中提供 `date`、`timezone`、三类排除计数、
+`latency`、`latency_by_time` 与 `latency_by_contract`；原有会话字段保留。
+每日统计限当前运行批次，各来源独立直方图；迟到旧记录不会将统计日期回退。
+更新后需要新的 Compute 进程读取归档/行情，并重新加载 Dashboard 后端，
+已有进程的会话状态不会因源码更新自动重算。TTS 历史回放继续隐藏实时延迟。
+
 在上述 Conda 环境中，推荐通过同一个参数入口启动：
 
 ```bash
@@ -183,3 +195,19 @@ sudo install -o root -g "$(id -gn)" -m 0640 ydClient.ini /opt/ydtrader/config/yd
 ```
 
 安装完成后可直接运行，不存在申请码、发证、激活、计时器或自动销毁步骤。详细人工流程见 `README_人工重跑执行流程.md` 和 `README_本机构建与完整运行.md`。
+# 接入独立计数
+
+运行目录的 `ctp-*.log`（实际文件名由来源配置决定）、`mux.log`、`publisher.log`
+中可搜索 `state=COUNTERS`。计数仅覆盖各进程本次生命周期，重启归零。
+
+- CTP Bridge：`callbacks` 为进入回调处理次数，`packed_packets` 为打包成功数，
+  `udp_sent_packets` 为完整数据报被本机 sendto 接受的次数。
+- Mux：按来源输出 `udp_received_packets`（含校验失败或超出目标数的数据报）、
+  `udp_sent_packets`（校验后完整发送成功数）、`expanded_records`（repeat 展开条数）。
+- Publisher：`udp_received_packets`、`validated_packets`、`aeron_accepted_records`
+  分别为接收数据报、校验成功数据报及 Aeron offer 接受的行情条数。
+
+Mux/Publisher 每 5 秒及正常退出或异常展开时输出；Bridge 沿用首条/每 100 条
+输出节奏，关闭时再输出。强制杀进程无法保证最后一份计数输出。
+这些是独立观测值，不改变丢包、乱序或重试处理。UDP 发送成功不等于对端收到，
+Aeron 接受不等于已经刷盘，计数差也不能直接当作永久丢包数。

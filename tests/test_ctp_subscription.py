@@ -34,6 +34,25 @@ def login(bridge):
     bridge.OnRspUserLogin(SimpleNamespace(TradingDay="20260903"), None, 1, True)
 
 
+def test_independent_ingress_counters(subscription_bridge):
+    bridge, _, _ = subscription_bridge
+    bridge.socket.close()
+    def send(packet, destination):
+        return len(packet)
+    bridge.socket = SimpleNamespace(sendto=send, close=lambda: None)
+    bridge.OnRtnDepthMarketData(SimpleNamespace())
+    assert (bridge.callbacks, bridge.packed_packets, bridge.sent_packets) == (1, 1, 1)
+    with pytest.raises(Exception):
+        bridge.OnRtnDepthMarketData(SimpleNamespace(Volume=2**100))
+    assert (bridge.callbacks, bridge.packed_packets, bridge.sent_packets) == (2, 1, 1)
+    def fail_send(packet, destination):
+        raise OSError("injected send failure")
+    bridge.socket.sendto = fail_send
+    with pytest.raises(OSError, match="injected"):
+        bridge.OnRtnDepthMarketData(SimpleNamespace())
+    assert (bridge.callbacks, bridge.packed_packets, bridge.sent_packets) == (3, 2, 1)
+
+
 def test_tts_defers_and_paces_each_configured_contract(subscription_bridge):
     bridge, clock, calls = subscription_bridge
     login(bridge)

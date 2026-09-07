@@ -37,6 +37,18 @@ class InputState:
     source_ticks: int = 0
     published: int = 0
     last_packet_at: float = 0.0
+    received_packets: int = 0
+
+
+def log_counters(states: list[InputState]) -> None:
+    timestamp_ns = time.time_ns()
+    for state in states:
+        print(
+            f"MULTI_SOURCE_MUX state=COUNTERS timestamp_ns={timestamp_ns} "
+            f"source={state.spec.source} udp_received_packets={state.received_packets} "
+            f"udp_sent_packets={state.source_ticks} expanded_records={state.published}",
+            flush=True,
+        )
 
 
 def fixed_source(value: str) -> bytes:
@@ -146,15 +158,20 @@ def run(args: argparse.Namespace) -> int:
         )
 
         global_sequence = 0
+        next_counters_at = started + 5.0
         while any(state.remaining for state in states):
             events = selector.select(timeout=0.05)
             now = time.monotonic()
+            if now >= next_counters_at:
+                log_counters(states)
+                next_counters_at = now + 5.0
             for state in states:
                 if state.remaining and now - state.last_packet_at > args.source_timeout_seconds:
                     raise TimeoutError(idle_timeout_message(state, args.source_timeout_seconds))
             for key, _ in events:
                 state: InputState = key.data
                 packet, _ = state.socket.recvfrom(2048)
+                state.received_packets += 1
                 state.last_packet_at = now
                 if not state.remaining:
                     continue
@@ -193,6 +210,7 @@ def run(args: argparse.Namespace) -> int:
         )
         return 0
     finally:
+        log_counters(states)
         selector.close()
         for state in states:
             state.socket.close()

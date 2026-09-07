@@ -343,6 +343,7 @@ public final class AeronMvp
 
         long backPressureCount = 0;
         long sourceTicks = 0;
+        long receivedPackets = 0;
         long published = 0;
         long lastSourceSequence = 0;
         long recordingId;
@@ -380,8 +381,14 @@ public final class AeronMvp
                 System.out.flush();
 
                 long lastPacketNs = System.nanoTime();
+                long nextCountersNs = lastPacketNs;
                 while (published < count)
                 {
+                    if (System.nanoTime() >= nextCountersNs)
+                    {
+                        logAdapterCounters(adapterName, receivedPackets, sourceTicks, published);
+                        nextCountersNs = System.nanoTime() + Duration.ofSeconds(5).toNanos();
+                    }
                     packet.clear();
                     if (source.receive(packet) == null)
                     {
@@ -398,6 +405,7 @@ public final class AeronMvp
                         continue;
                     }
                     lastPacketNs = System.nanoTime();
+                    receivedPackets++;
                     packet.flip();
                     final int packetSize = packet.remaining();
                     if (packetSize != ADAPTER_PACKET_SIZE_V1 &&
@@ -575,6 +583,11 @@ public final class AeronMvp
             awaitStopPosition(archive, recordingId, stopPosition, Duration.ofSeconds(10));
         }
 
+        finally
+        {
+            logAdapterCounters(adapterName, receivedPackets, sourceTicks, published);
+        }
+
         System.out.printf(
             Locale.ROOT,
             "AERON_MVP_ADAPTER_PUBLISH result=SUCCESS adapter=%s recording_id=%d " +
@@ -586,6 +599,16 @@ public final class AeronMvp
             stopPosition,
             backPressureCount);
         return 0;
+    }
+
+    private static void logAdapterCounters(
+        final String adapter, final long received, final long validated, final long accepted)
+    {
+        System.out.printf(Locale.ROOT,
+            "AERON_MVP_ADAPTER_PUBLISHER state=COUNTERS timestamp_ms=%d adapter=%s " +
+                "udp_received_packets=%d validated_packets=%d aeron_accepted_records=%d%n",
+            System.currentTimeMillis(), adapter, received, validated, accepted);
+        System.out.flush();
     }
 
     private static int runConsumer(final Options options, final ConsumerMode mode) throws Exception
@@ -818,6 +841,48 @@ public final class AeronMvp
             !"2026-08-28T09:45:00+08:00".equals(formatTimeBin(sampleTimeBin)))
         {
             throw new IllegalStateException("latency distribution self-test failed");
+        }
+        final DailyLatency daily = new DailyLatency();
+        final long noon = Instant.parse("2026-09-07T04:00:00Z").getEpochSecond() * 1_000_000_000L;
+        final long dayNs = 86_400_000_000_000L;
+        daily.record(noon, noon - 75_000_000L, true, "A");
+        daily.record(noon, noon - 81_000_000L, true, "A");
+        daily.record(noon, noon - 146_000_000L, true, "B");
+        daily.record(noon, noon - dayNs, true, "A");
+        daily.record(noon, noon + dayNs, true, "A");
+        daily.record(noon, 0, false, "A");
+        if (daily.latency.count != 3 || Math.abs(daily.latency.mean - 100.6666667) > 0.0001 ||
+            Math.abs(daily.latency.std() - distribution.std()) > 0.0001 ||
+            Math.abs(daily.latency.percentile(95) - 146) > 0.1 ||
+            daily.oldSnapshots != 1 || daily.futureDates != 1 || daily.invalidTimestamps != 1 ||
+            daily.byContract.get("A").count != 2 || daily.byTime.size() != 1)
+        {
+            throw new IllegalStateException("daily latency filtering self-test failed");
+        }
+        daily.record(noon, noon - 60_000_000_000L, true, "B");
+        if (daily.latency.count != 4 || daily.latency.max != 60_000)
+        {
+            throw new IllegalStateException("same-day slow quote was excluded");
+        }
+        final DailyLatency otherSource = new DailyLatency();
+        otherSource.record(noon, noon - 10_000_000L, true, "A");
+        final long midnight = Instant.parse("2026-09-07T16:00:00Z").getEpochSecond() * 1_000_000_000L;
+        daily.record(midnight, midnight - 1, true, "A");
+        daily.record(midnight + 100_000_000L, midnight, true, "A");
+        daily.record(noon, noon - 1, true, "A");
+        if (!daily.date.toString().equals("2026-09-08") || daily.latency.count != 1 ||
+            daily.latency.mean != 100 || daily.oldSnapshots != 2 || daily.futureDates != 0 ||
+            daily.invalidTimestamps != 0 || daily.byContract.size() != 1 ||
+            otherSource.latency.count != 1 || otherSource.latency.mean != 10)
+        {
+            throw new IllegalStateException("daily rollover/source isolation self-test failed");
+        }
+        final StringBuilder dailyJson = new StringBuilder();
+        daily.appendJson(dailyJson);
+        if (!dailyJson.toString().contains("\"date\":\"2026-09-08\"") ||
+            !dailyJson.toString().contains("\"latency_by_contract\""))
+        {
+            throw new IllegalStateException("daily serialization self-test failed");
         }
         System.out.printf(
             Locale.ROOT,
@@ -1245,6 +1310,7 @@ public final class AeronMvp
         private final Map<Long, LatencyDistribution> latencyByTimeBin = new HashMap<>();
         private final Map<String, LatencyDistribution> latencyByInstrument = new HashMap<>();
         private final Map<String, LatencyDistribution> latencyBySource = new HashMap<>();
+        private final Map<String, DailyLatency> dailyLatencyBySource = new HashMap<>();
         private final Map<String, QuoteSnapshot> latestQuoteBySource = new HashMap<>();
         private final Map<String, Map<Long, LatencyDistribution>> latencyBySourceTimeBin = new HashMap<>();
         private final Map<String, Map<String, LatencyDistribution>> latencyBySourceInstrument = new HashMap<>();
@@ -1353,6 +1419,9 @@ public final class AeronMvp
 
             if (mode == ConsumerMode.COMPUTE)
             {
+                dailyLatencyBySource.computeIfAbsent(quoteSource, key -> new DailyLatency()).record(
+                    quoteDecoder.localReceiveNs(), quoteDecoder.marketTimestampNs(),
+                    quoteDecoder.timestampValid() == BooleanType.TRUE, lastInstrument);
                 if (quoteDecoder.timestampValid() != BooleanType.TRUE)
                 {
                     invalidTimestamps++;
@@ -1515,7 +1584,7 @@ public final class AeronMvp
             return serializeTimeBinStats(latencyByTimeBin);
         }
 
-        private String serializeTimeBinStats(final Map<Long, LatencyDistribution> distributions)
+        private static String serializeTimeBinStats(final Map<Long, LatencyDistribution> distributions)
         {
             final List<Long> keys = new ArrayList<>(distributions.keySet());
             keys.sort(Long::compareTo);
@@ -1537,7 +1606,7 @@ public final class AeronMvp
             return serializeContractStats(latencyByInstrument);
         }
 
-        private String serializeContractStats(final Map<String, LatencyDistribution> distributions)
+        private static String serializeContractStats(final Map<String, LatencyDistribution> distributions)
         {
             final List<String> keys = new ArrayList<>(distributions.keySet());
             keys.sort(String::compareTo);
@@ -1605,6 +1674,16 @@ public final class AeronMvp
                 {
                     latency.appendJson(json, "source", source);
                 }
+                json.append(",\"daily_latency\":");
+                final DailyLatency daily = dailyLatencyBySource.get(source);
+                if (daily == null)
+                {
+                    json.append("null");
+                }
+                else
+                {
+                    daily.appendJson(json);
+                }
                 json.append(",\"latency_by_time\":")
                     .append(serializeTimeBinStats(
                         latencyBySourceTimeBin.getOrDefault(source, java.util.Collections.emptyMap())))
@@ -1644,6 +1723,74 @@ public final class AeronMvp
         private static String nullableVolume(final long value)
         {
             return value > 0 ? Long.toString(value) : "null";
+        }
+    }
+
+    private static final class DailyLatency
+    {
+        private java.time.LocalDate date;
+        private LatencyDistribution latency = new LatencyDistribution();
+        private final Map<Long, LatencyDistribution> byTime = new HashMap<>();
+        private final Map<String, LatencyDistribution> byContract = new HashMap<>();
+        private long oldSnapshots;
+        private long futureDates;
+        private long invalidTimestamps;
+
+        private void record(final long receiveNs, final long marketNs, final boolean valid,
+            final String instrument)
+        {
+            final java.time.LocalDate receiveDate = Instant.ofEpochSecond(
+                Math.floorDiv(receiveNs, 1_000_000_000L)).atZone(CHINA_ZONE).toLocalDate();
+            if (date == null || receiveDate.isAfter(date))
+            {
+                date = receiveDate;
+                latency = new LatencyDistribution();
+                byTime.clear();
+                byContract.clear();
+                oldSnapshots = futureDates = invalidTimestamps = 0;
+            }
+            if (receiveDate.isBefore(date))
+            {
+                oldSnapshots++;
+                return;
+            }
+            if (!valid)
+            {
+                invalidTimestamps++;
+                return;
+            }
+            final long marketSeconds = Math.floorDiv(marketNs, 1_000_000_000L);
+            final java.time.LocalDate marketDate = Instant.ofEpochSecond(marketSeconds)
+                .atZone(CHINA_ZONE).toLocalDate();
+            if (marketDate.isBefore(date))
+            {
+                oldSnapshots++;
+                return;
+            }
+            if (marketDate.isAfter(date))
+            {
+                futureDates++;
+                return;
+            }
+            final double value = Math.abs(receiveNs - marketNs) / 1_000_000.0;
+            latency.record(value);
+            final long bin = Math.floorDiv(marketSeconds, LATENCY_TIME_BIN_SECONDS) *
+                LATENCY_TIME_BIN_SECONDS;
+            byTime.computeIfAbsent(bin, key -> new LatencyDistribution()).record(value);
+            byContract.computeIfAbsent(instrument, key -> new LatencyDistribution()).record(value);
+        }
+
+        private void appendJson(final StringBuilder json)
+        {
+            json.append("{\"date\":\"").append(date)
+                .append("\",\"timezone\":\"Asia/Shanghai\",\"old_snapshots\":").append(oldSnapshots)
+                .append(",\"future_dates\":").append(futureDates)
+                .append(",\"invalid_timestamps\":").append(invalidTimestamps)
+                .append(",\"latency\":");
+            latency.appendJson(json, "date", date.toString());
+            json.append(",\"latency_by_time\":").append(ConsumerState.serializeTimeBinStats(byTime))
+                .append(",\"latency_by_contract\":").append(ConsumerState.serializeContractStats(byContract))
+                .append('}');
         }
     }
 

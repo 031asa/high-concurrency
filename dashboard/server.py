@@ -6,7 +6,7 @@ from __future__ import annotations
 import argparse
 import json
 import time
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -19,6 +19,7 @@ DEFAULT_RESULT_ROOT = PROJECT_ROOT / "result" / "aeron-mvp"
 DEFAULT_TIME_REPORT_ROOT = PROJECT_ROOT
 INDEX_FILE = Path(__file__).resolve().with_name("index.html")
 MAX_SERIES_POINTS = 720
+CHINA_TZ = timezone(timedelta(hours=8))
 MAX_PROGRESS_BYTES = 2 * 1024 * 1024
 MAX_TIME_REPORT_BYTES = 256 * 1024
 DEFAULT_TIME_REPORT_MAX_AGE_SECONDS = 300
@@ -395,6 +396,29 @@ def _select_compute_source(
     return selected
 
 
+def _daily_view(payload: Dict[str, Any], source: Optional[str], today: str) -> Dict[str, Any]:
+    view = _source_view(payload, source) or {}
+    daily = view.get("daily_latency")
+    provided = isinstance(daily, dict)
+    current = provided and daily.get("date") == today
+    latency = daily.get("latency") if current else None
+    latency = latency if isinstance(latency, dict) and latency.get("count", 0) > 0 else {}
+    legacy = bool(view) or ("source_views" not in payload and
+                            bool(payload.get("quote") or payload.get("received")))
+    status = "READY" if latency else ("NOT_PROVIDED" if not provided and legacy else "WAITING")
+    return {
+        "date": today,
+        "status": status,
+        "message": {"READY": "北京时间当天统计", "WAITING": "等待当天行情",
+                    "NOT_PROVIDED": "该运行未提供当天统计"}[status],
+        "latency": latency,
+        "latency_by_time": daily.get("latency_by_time", []) if latency else [],
+        "latency_by_contract": daily.get("latency_by_contract", []) if latency else [],
+        "excluded": {key: daily.get(key, 0) if current else 0 for key in
+                     ("old_snapshots", "future_dates", "invalid_timestamps")},
+    }
+
+
 def collect_status(result_root: Path, source: Optional[str] = None) -> Dict[str, Any]:
     now_ms = int(time.time() * 1000)
     requested_source = source or None
@@ -433,6 +457,20 @@ def collect_status(result_root: Path, source: Optional[str] = None) -> Dict[str,
     raw_compute, compute_rows = _consumer_payload(run_dir, "compute")
     isolate_source = meta.get("source") == "multi" or len(sources) > 1
     compute = _select_compute_source(raw_compute, selected_source, isolate_source)
+    session_latency = dict(_source_latency(raw_compute, selected_source))
+    if not session_latency and not isolate_source and selected_source:
+        session_latency = {key: raw_compute.get(key) for key in
+                           ("mean_ms", "std_ms", "p50_ms", "p90_ms", "p95_ms", "p99_ms", "max_ms")}
+        session_latency["count"] = raw_compute.get("measured", 0)
+    compute["session_latency"] = session_latency
+    today = datetime.fromtimestamp(now_ms / 1000, CHINA_TZ).date().isoformat()
+    daily = _daily_view(raw_compute, selected_source, today)
+    for field in ("mean_ms", "std_ms", "p50_ms", "p90_ms", "p95_ms", "p99_ms", "max_ms"):
+        compute[field] = daily["latency"].get(field)
+    compute["source_measured"] = daily["latency"].get("count", 0)
+    compute["latency_by_time"] = daily["latency_by_time"]
+    compute["latency_by_contract"] = daily["latency_by_contract"]
+    compute["daily_latency"] = daily
     audit, _ = _consumer_payload(run_dir, "audit")
     run_status = meta.get("status", "RUNNING")
     run = {
@@ -450,7 +488,6 @@ def collect_status(result_root: Path, source: Optional[str] = None) -> Dict[str,
         "status": run_status,
         "result_dir": str(run_dir),
     }
-    legacy_single_source = len(sources) == 1 and not isolate_source
     series = [
         {
             **{
@@ -461,17 +498,20 @@ def collect_status(result_root: Path, source: Optional[str] = None) -> Dict[str,
                     "rate_per_second",
                 )
             },
-            **(
-                _source_latency(row, selected_source)
-                if not legacy_single_source
-                else {key: row.get(key) for key in ("mean_ms", "p95_ms", "max_ms")}
-            ),
+            **(_daily_view(row, selected_source, today)["latency"]
+               if datetime.fromtimestamp((row.get("timestamp_ms") or 0) / 1000, CHINA_TZ)
+                   .date().isoformat() == today else {}),
         }
         for row in compute_rows
     ]
     for point in series:
         point["observed_delta_ms"] = point.get("mean_ms")
     historical = source_latency_mode == "historical_replay"
+    if historical:
+        compute["latency_by_time"] = []
+        compute["latency_by_contract"] = []
+        for point in series:
+            point["observed_delta_ms"] = None
     market_observation = {
         "status": "HISTORICAL" if historical else ("SYNTHETIC" if source_kind == "synthetic" else "LIVE"),
         "valid_for_live_observation": not historical,
@@ -480,6 +520,15 @@ def collect_status(result_root: Path, source: Optional[str] = None) -> Dict[str,
         "mean_abs_ms": None if historical else compute.get("mean_ms"),
         "p95_abs_ms": None if historical else compute.get("p95_ms"),
         "max_abs_ms": None if historical else compute.get("max_ms"),
+        "statistics_date": today,
+        "timezone": "Asia/Shanghai",
+        "daily_status": daily["status"],
+        "daily_message": daily["message"],
+        "sample_count": daily["latency"].get("count", 0),
+        "session_mean_abs_ms": None if historical else session_latency.get("mean_ms"),
+        "session_sample_count": session_latency.get("count", 0),
+        "excluded": daily["excluded"],
+        "last_market_time": (compute.get("quote") or {}).get("market_time"),
     }
     return {
         "dashboard_status": run_status,

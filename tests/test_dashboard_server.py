@@ -3,6 +3,7 @@ import tempfile
 import threading
 import unittest
 import urllib.request
+from unittest.mock import patch
 from http.server import ThreadingHTTPServer
 from pathlib import Path
 
@@ -117,12 +118,29 @@ class DashboardStatusTests(unittest.TestCase):
                     },
                 ],
             }
+            progress["timestamp_ms"] = NOW_MS
+            for view in progress["source_views"]:
+                view["daily_latency"] = {
+                    "date": "2026-01-02", "latency": dict(view["latency"]),
+                    "latency_by_time": view["latency_by_time"],
+                    "latency_by_contract": view["latency_by_contract"],
+                    "old_snapshots": 2, "future_dates": 1, "invalid_timestamps": 3,
+                }
+                view["latency"] = {"mean_ms": 999999, "count": 100}
             (run / "compute-live.ndjson").write_text(
                 json.dumps(progress) + "\n", encoding="utf-8"
             )
 
-            ydapi = collect_status(root, source="ydapi-main")
-            ctp = collect_status(root, source="ctp-live-main")
+            with patch("dashboard.server.time.time", return_value=NOW_MS / 1000):
+                ydapi = collect_status(root, source="ydapi-main")
+                ctp = collect_status(root, source="ctp-live-main")
+            with patch("dashboard.server.time.time", return_value=NOW_MS / 1000 + 86400):
+                tomorrow = collect_status(root, source="ydapi-main")
+            self.assertIsNone(tomorrow["market_observation"]["mean_abs_ms"])
+            self.assertEqual("WAITING", tomorrow["market_observation"]["daily_status"])
+            self.assertEqual([], tomorrow["compute"]["latency_by_contract"])
+            self.assertIsNone(tomorrow["series"][0]["observed_delta_ms"])
+            self.assertEqual(0, tomorrow["market_observation"]["excluded"]["old_snapshots"])
 
         self.assertEqual("IC2609", ydapi["compute"]["quote"]["instrument"])
         self.assertEqual(5100.5, ydapi["compute"]["quote"]["last_price"])
@@ -134,6 +152,12 @@ class DashboardStatusTests(unittest.TestCase):
         self.assertEqual(4200.0, ctp["compute"]["quote"]["last_price"])
         self.assertEqual(3.5, ctp["market_observation"]["mean_abs_ms"])
         self.assertEqual(20, ctp["compute"]["received"])
+        self.assertEqual(2, ctp["market_observation"]["excluded"]["old_snapshots"])
+        self.assertEqual(1, ctp["market_observation"]["excluded"]["future_dates"])
+        self.assertEqual(3, ctp["market_observation"]["excluded"]["invalid_timestamps"])
+        self.assertEqual(8, ctp["market_observation"]["sample_count"])
+        self.assertEqual(999999, ctp["market_observation"]["session_mean_abs_ms"])
+        self.assertEqual(100, ctp["market_observation"]["session_sample_count"])
 
     def test_configured_source_without_quote_does_not_fallback_to_another_source(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -252,19 +276,45 @@ class DashboardStatusTests(unittest.TestCase):
         self.assertEqual("SUCCESS", status["dashboard_status"])
         self.assertEqual("latest", status["run"]["id"])
         self.assertEqual("live", status["run"]["latency_mode"])
-        self.assertEqual(2.0, status["compute"]["p95_ms"])
+        self.assertIsNone(status["compute"]["p95_ms"])
         self.assertEqual("IF2609", status["compute"]["quote"]["instrument"])
-        self.assertEqual(
-            "2026-01-02T09:30:00+08:00",
-            status["compute"]["latency_by_time"][0]["time_bin"],
-        )
-        self.assertEqual("IF2609", status["compute"]["latency_by_contract"][0]["contract"])
-        self.assertEqual(2.8, status["compute"]["latency_by_contract"][0]["p99_ms"])
+        self.assertEqual([], status["compute"]["latency_by_time"])
+        self.assertEqual([], status["compute"]["latency_by_contract"])
+        self.assertEqual("该运行未提供当天统计", status["market_observation"]["daily_message"])
         self.assertEqual(100, status["audit"]["received"])
         self.assertEqual([10, 100], [point["received"] for point in status["series"]])
         self.assertEqual("absolute_timestamp_delta", status["market_observation"]["metric"])
-        self.assertEqual(1.25, status["market_observation"]["mean_abs_ms"])
-        self.assertEqual([1.25, None], [point["observed_delta_ms"] for point in status["series"]])
+        self.assertIsNone(status["market_observation"]["mean_abs_ms"])
+        self.assertEqual([None, None], [point["observed_delta_ms"] for point in status["series"]])
+        self.assertEqual(1.25, status["market_observation"]["session_mean_abs_ms"])
+
+    def test_daily_empty_exclusions_and_historical_hiding(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            run = root / "run"
+            run.mkdir()
+            meta = "source=multi\nsources=live,tts\nsource_latency_mode.live=live\nsource_latency_mode.tts=historical_replay\n"
+            (run / "run.meta").write_text(meta)
+            daily = {"date": "2026-01-02", "latency": {"count": 0, "mean_ms": 0},
+                     "old_snapshots": 5, "future_dates": 2, "invalid_timestamps": 1}
+            payload = {"timestamp_ms": NOW_MS, "received": 8, "source_views": [
+                {"source": "live", "quote": {"instrument": "A", "market_time": "20260101 23:00:00"},
+                 "daily_latency": daily, "latency": {"mean_ms": 5000, "count": 8}},
+                {"source": "tts", "daily_latency": {"date": "2026-01-02",
+                 "latency": {"count": 1, "mean_ms": 80}, "latency_by_time": [{"count": 1}]},
+                 "latency": {"mean_ms": 9000, "count": 1}}]}
+            (run / "compute-live.ndjson").write_text(json.dumps(payload) + "\n")
+            with patch("dashboard.server.time.time", return_value=NOW_MS / 1000):
+                live = collect_status(root, "live")
+                historical = collect_status(root, "tts")
+            self.assertEqual("WAITING", live["market_observation"]["daily_status"])
+            self.assertIsNone(live["market_observation"]["mean_abs_ms"])
+            self.assertEqual(5, live["market_observation"]["excluded"]["old_snapshots"])
+            self.assertEqual(5000, live["market_observation"]["session_mean_abs_ms"])
+            self.assertIsNone(historical["market_observation"]["mean_abs_ms"])
+            self.assertIsNone(historical["market_observation"]["session_mean_abs_ms"])
+            self.assertIsNone(historical["series"][0]["observed_delta_ms"])
+            self.assertEqual([], historical["compute"]["latency_by_time"])
 
     def test_time_sync_is_separate_and_unavailable_without_reports(self):
         with tempfile.TemporaryDirectory() as directory:

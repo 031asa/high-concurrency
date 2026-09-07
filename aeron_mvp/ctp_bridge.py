@@ -97,6 +97,9 @@ class CtpMarketBridge(mdapi.CThostFtdcMdSpi):
         self.socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         self.destination = (args.udp_host, args.udp_port)
         self.sequence = 0
+        self.callbacks = 0
+        self.packed_packets = 0
+        self.sent_packets = 0
         self.publish_lock = threading.Lock()
         self.last_tick_monotonic = time.monotonic()
         self.connected = False
@@ -122,6 +125,14 @@ class CtpMarketBridge(mdapi.CThostFtdcMdSpi):
             self.api.Release()
             self.api = None
         self.socket.close()
+        self.log_counters()
+
+    def log_counters(self) -> None:
+        print(
+            f"CTP_BRIDGE state=COUNTERS timestamp_ns={time.time_ns()} "
+            f"callbacks={self.callbacks} packed_packets={self.packed_packets} "
+            f"udp_sent_packets={self.sent_packets}", flush=True,
+        )
 
     def OnFrontConnected(self) -> None:
         self.connected = True
@@ -190,6 +201,7 @@ class CtpMarketBridge(mdapi.CThostFtdcMdSpi):
             self._publish_tick(tick)
 
     def _publish_tick(self, tick) -> None:
+        self.callbacks += 1
         local_receive_ns = time.time_ns()
         market_ns, market_raw, timestamp_valid = market_timestamp(
             tick, local_receive_ns,
@@ -245,8 +257,12 @@ class CtpMarketBridge(mdapi.CThostFtdcMdSpi):
             fixed_utf8(action_day, 16),
             fixed_utf8(update_time, 16),
         )
-        self.socket.sendto(packet, self.destination)
+        self.packed_packets += 1
+        sent = self.socket.sendto(packet, self.destination)
+        if sent == len(packet):
+            self.sent_packets += 1
         if self.sequence == 1 or self.sequence % 100 == 0:
+            self.log_counters()
             print(
                 f"CTP_BRIDGE state=FORWARDING source_ticks={self.sequence} "
                 f"instrument={instrument} market_time={market_raw} repeat={self.args.repeat}",
