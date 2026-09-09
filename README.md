@@ -236,3 +236,33 @@ python scripts/analyze_archive.py --run-dir result/aeron-mvp/RUN_ID --date 2026-
 建议选择已停止的批次，读取运行中归档只是非原子快照，可能遇到不完整帧。
 只读原始文件、不启动服务、不自动判断丢包；序号连续不代表持久化前无丢失。
 间隔需人工结合休市、回调与进程日志核验。报告输出必须位于原始运行目录之外。
+
+## Redis 交易兼容入口
+
+交易核心以 `trader-api` 提交 `ed86bc0070a757886201fe066fb60d68fac05aed` 的
+`scripts/order.py` 替换，保留 Linux 路径、延迟加载与原 `python main.py order ...` 入口。
+Redis 服务迁自同一提交的 `scripts/yd_redis_server.py`，共用这一份交易核心。
+
+在项目专用 Conda 环境中先更新 `environment.yml` 中的依赖。以下帮助命令不连接柜台或 Redis：
+
+```bash
+python main.py order --help
+python main.py redis-trader --help
+python scripts/yd_redis_server.py --help
+```
+
+需要启动交易服务时，在项目根目录执行 `python main.py redis-trader`，或使用兼容脚本
+`python scripts/yd_redis_server.py`。这会连接配置的柜台，并消费真实交易指令。
+两个入口共用 `--account-config`、`--api-config`、`--startup-timeout`（默认 60 秒）。
+Redis 参数仍为 `REDIS_HOST`、`REDIS_PORT`、`REDIS_DB`，默认 `127.0.0.1:6379/0`。
+同一账号队列只运行一个消费入口；行情和 Dashboard 不会自动启动该服务。
+
+队列及数据格式保持原脚本：`order_queue:{account_id}` 使用 BRPOP，
+`callback_queue:{account_id}` 使用 LPUSH；回报封装为 `type` 与 `data`。
+`order_map:{account_id}` 保存 local_id 映射，`positions:{account_id}` 每 5 秒更新。
+指令仍只分发 `order`、`cancel`、`cancel_all`，不接入持仓查询指令。
+
+原脚本行为未在迁移时统一或修复：Redis 下单和单撤直接调用 API，未经过人工入口的
+完整控制与计数路径；重复 local_id 会覆盖映射；重新启动后的回报关联只搜索内存映射；
+必填字段转换异常可能只写日志而没有错误回报；Redis 故障没有回报重放机制。
+这些是待单独确认的问题，不视为本次修复完成。离线测试通过不等于柜台联调通过。

@@ -16,6 +16,7 @@ BUSINESS_MODULES = {
 
 # Import on demand: top-level help must not load native broker APIs or start services.
 APPLICATION_MODULES = {
+    "redis-trader": "ydcore.yd_redis_server",
     "dashboard": "dashboard.server",
     "source-config": "aeron_mvp.source_config",
     "multi-source-mux": "aeron_mvp.multi_source_mux",
@@ -40,6 +41,7 @@ SHELL_HELP = {
 USAGE = """usage: ydtrader <command> [options]
 
 commands:
+  redis-trader [options]      independent Redis trading service
   order [original options]     trading, control, query, and cancel functions
   monitor [original options]   independent account monitor
   marketdata [original options] subscribe and compare market timestamps

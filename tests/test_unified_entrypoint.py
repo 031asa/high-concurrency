@@ -214,6 +214,13 @@ def test_compiled_modules_work_without_their_python_sources(tmp_path):
         for source in (ROOT / directory).iterdir():
             if source.suffix in {".py", ".html"}:
                 shutil.copy2(source, target / source.name)
+    # Redis worker imports the shared trading core and its error catalogue.
+    (app / "data").mkdir()
+    shutil.copy2(ROOT / "data" / "error_code.csv", app / "data" / "error_code.csv")
+    # Preserve local Python support modules used by the current dashboard.
+    (app / "scripts").mkdir()
+    for support in (ROOT / "scripts").glob("*.py"):
+        shutil.copy2(support, app / "scripts" / support.name)
     shutil.copy2(ENTRY, app / ENTRY.name)
     entry = app / ENTRY.name
     config = tmp_path / "source config.json"
@@ -224,7 +231,7 @@ def test_compiled_modules_work_without_their_python_sources(tmp_path):
     before = [_run(entry, *arguments, cwd=tmp_path) for arguments in commands]
     for arguments, result in zip(commands, before):
         assert result.returncode == 0, (arguments, result.returncode, result.stderr)
-    names = ["ydcore.launcher", "aeron_mvp.market_wire", "aeron_mvp.ctp_bridge", *launcher.APPLICATION_MODULES.values()]
+    names = ["ydcore.launcher", "ydcore.trading", "aeron_mvp.market_wire", "aeron_mvp.ctp_bridge", *launcher.APPLICATION_MODULES.values()]
     sources = [name.replace(".", "/") + ".py" for name in names]
     setup = tmp_path / "setup_extensions.py"
     setup.write_text(

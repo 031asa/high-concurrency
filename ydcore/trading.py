@@ -16,11 +16,9 @@ _DLL_DIRECTORY = None
 if os.name == "nt" and VENDOR_DIR.exists():
     _DLL_DIRECTORY = os.add_dll_directory(str(VENDOR_DIR))
 
-
 def create_ydapi(*args, **kwargs):
-    """Load the vendor extension only after authorization has succeeded."""
+    """Load the native SDK only when constructing a trader."""
     from pyyd import YDApi
-
     return YDApi(*args, **kwargs)
 
 LOG_DIR = PROJECT_ROOT / "logs"
@@ -238,6 +236,7 @@ class Trader:
         self.orders = {}      # (account, order_group, order_ref) -> order
         self.orders_by_local = {}  # 仅供查询，不作为订单身份
         self.strategy_by_order_ref = {}  # 脚本侧关联；易达订单结构没有 strategy_id
+        self.last_submitted_order_ref = None  # 统一网关读取；不改变原有 send_order 返回值
         self.owned_orders = set()
         self.pending_signature = None
         self.auto_cancel = False
@@ -445,6 +444,7 @@ class Trader:
             )
             raise RuntimeError(message)
         order_ref = self.api.next_order_ref()
+        self.last_submitted_order_ref = order_ref
         send_params = dict(params, order_ref=order_ref)
         self.strategy_by_order_ref[(0, order_ref)] = strategy_id
         self.pending_signature = (
@@ -958,3 +958,6 @@ def run(argv=None):
         return 1
 
 main = run
+
+if __name__ == "__main__":
+    sys.exit(run())

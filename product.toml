@@ -9,13 +9,14 @@ install_root = "/opt/ydtrader"
 state_root = "/var/lib/ydtrader"
 
 [protection]
-protected_modules = ["launcher", "marketdata", "monitoring", "trading"]
+protected_modules = ["launcher", "marketdata", "monitoring", "trading", "yd_redis_server"]
 nuitka_include_modules = [
   "pyyd",
   "ydcore.launcher",
   "ydcore.marketdata",
   "ydcore.monitoring",
   "ydcore.trading",
+  "ydcore.yd_redis_server",
   "aeron_mvp.ctp_bridge",
   "aeron_mvp.ctp_cli",
   "aeron_mvp.market_wire",
@@ -26,7 +27,7 @@ nuitka_include_modules = [
   "aeron_mvp.zmq_market_probe",
   "dashboard.server",
 ]
-nuitka_include_packages = []
+nuitka_include_packages = ["redis"]
 
 [protection.packages]
 aeron_mvp = [
