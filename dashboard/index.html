@@ -58,6 +58,20 @@
     </section>
 
     <section class="domain">
+      <div class="domain-head"><div><h2 class="domain-title">系统时钟检测留档（只读）</h2><div class="domain-description">独立于行情链路；偏移 = 授时源 − 本机。正值表示本机落后；不执行校时，不扣减行情延迟。</div></div></div>
+      <div class="domain-body">
+        <label style="display:inline-block;margin:0 16px 12px 0">北京时间日期 <input id="clock-date" type="date" style="background:#102532;color:#ddf4fa;border:1px solid #315365;border-radius:6px;padding:7px"></label>
+        <label style="display:inline-block;margin:0 16px 12px 0">主机 / 授时源 <select id="clock-source" style="background:#102532;color:#ddf4fa;border:1px solid #315365;border-radius:6px;padding:7px"></select></label>
+        <a id="clock-export" target="_blank" rel="noopener" style="color:#69d6ef">查看当天原始JSON</a>
+        <div id="clock-summary" class="section-meta" aria-live="polite">等待检测记录</div>
+        <svg id="clock-chart" viewBox="0 0 900 180" role="img" aria-label="时钟偏移毫秒曲线" style="width:100%;max-height:220px"></svg>
+        <div class="section-meta">曲线按实际检测时间排列；失败点不连线。采样总耗时不是网络RTT；本方法未提供RTT与不确定度，留空而非记零。容器通常共享宿主时钟，hostname仅标识探测执行环境。</div>
+        <div class="table-wrap"><table><thead><tr><th>检测时间（北京）</th><th>状态</th><th>偏移 ms</th><th>采样耗时 ms</th><th>原始证据</th></tr></thead><tbody id="clock-rows"></tbody></table></div>
+        <div id="clock-path" class="section-meta"></div>
+      </div>
+    </section>
+
+    <section class="domain">
       <div class="domain-head"><div><div class="domain-kicker">02 · 行情观测域</div><h2 class="domain-title">实时行情链路</h2><div class="domain-description">接收、归档、计算和审计行情；行情时间差只描述观测现象，不参与系统对时。</div></div><div class="domain-rule">绝对行情观测差 = |本地回调接收时间 − 行情事件时间|，其中包含时钟差、网络、柜台、网关和回调排队。</div></div>
       <div class="domain-body">
         <section class="runbar"><div class="run-cell"><div class="label">Run ID</div><div id="run-id" class="run-value">—</div></div><div class="run-cell"><label class="label" for="source-select">行情源</label><select id="source-select" class="source-select" aria-label="选择行情源"><option value="">等待运行配置</option></select></div><div class="run-cell"><div class="label">Recording</div><div id="recording" class="run-value">—</div></div><div class="run-cell"><div class="label">Archive刷盘级别</div><div id="sync-level" class="run-value">—</div></div><div class="run-cell"><div class="label">开始时间 UTC</div><div id="started" class="run-value">—</div></div></section>
@@ -87,6 +101,33 @@
     const statusClass=value=>({PASS:'pass',FAIL:'fail',PARTIAL:'partial',STALE:'stale',INVALID:'invalid'}[value]||'');
     const ageText=report=>{if(!report||!report.available)return'未生成报告';if(report.age_seconds===null||report.age_seconds===undefined)return report.failure||'报告时间无效';const seconds=Math.abs(Number(report.age_seconds));return seconds<60?`${number(seconds,0)}秒前`:`${number(seconds/60,1)}分钟前`};
     document.querySelectorAll('[data-copy]').forEach(button=>button.addEventListener('click',async()=>{const source=$(button.dataset.copy);try{await navigator.clipboard.writeText(source.textContent);const original=button.textContent;button.textContent='已复制';setTimeout(()=>{button.textContent=original},1200)}catch(_){button.textContent='复制失败'}}));
+    let clockData=null,clockManualDate=false;
+    function renderClock(){
+      if(!clockData)return;
+      const data=clockData,select=$('clock-source'),previous=select.value,groups=data.groups||[];
+      const key=g=>JSON.stringify([g.hostname,g.server]);
+      select.innerHTML=groups.map(g=>'<option value="'+escapeHtml(key(g))+'">'+escapeHtml(g.hostname+' / '+g.server)+'</option>').join('');
+      if(groups.some(g=>key(g)===previous))select.value=previous;
+      const group=groups.find(g=>key(g)===select.value),rows=(data.rows||[]).filter(r=>key(r)===select.value),latest=rows[rows.length-1];
+      const stale=latest&&(Date.now()-Date.parse(latest.generated_at_utc)>660000);
+      $('clock-summary').textContent=group?data.date+' · '+group.count+'次检测 / '+group.valid+'次有效 / '+group.failed+'次失败 / '+group.exceeded+'次超限 · 平均偏移 '+number(group.mean_ms,3)+' ms · 最大绝对偏移 '+number(group.max_abs_ms,3)+' ms · 最新 '+latest.status+(stale?'（已过期或采样停止）':''):'当天尚无检测记录；不代表零偏移';
+      $('clock-path').textContent='留档：'+data.root+'/'+data.date+'/*.json；不可读文件 '+data.unreadable_files+' 个。原始记录保留，历史未检测的日期不补造数据。';
+      $('clock-export').href='/api/clock-history?date='+encodeURIComponent(data.date);
+      $('clock-rows').innerHTML=rows.slice(-100).reverse().map(r=>'<tr><td>'+escapeHtml(new Date(r.started_at_utc).toLocaleString('zh-CN',{timeZone:'Asia/Shanghai',hour12:false}))+'</td><td>'+escapeHtml(r.status)+'</td><td>'+number(r.offset_ms,3)+'</td><td>'+number(r.duration_ms,1)+'</td><td><details><summary>查看</summary><pre style="white-space:pre-wrap;max-width:600px">'+escapeHtml(JSON.stringify(r,null,2))+'</pre></details></td></tr>').join('')||'<tr><td colspan="5">等待检测记录</td></tr>';
+      const svg=$('clock-chart'),valid=rows.filter(r=>Number.isFinite(r.offset_ms)),min=Math.min(0,...valid.map(r=>r.offset_ms)),max=Math.max(1,...valid.map(r=>r.offset_ms));
+      const t0=rows.length?Date.parse(rows[0].started_at_utc):0,t1=rows.length?Date.parse(rows[rows.length-1].started_at_utc):1;
+      const x=r=>65+800*(Date.parse(r.started_at_utc)-t0)/Math.max(1,t1-t0),y=r=>15+130*(max-r.offset_ms)/Math.max(1,max-min);
+      let markup='<text class="axis-label" x="0" y="20">'+number(max,2)+'</text><text class="axis-label" x="0" y="145">'+number(min,2)+'</text>',segment=[];
+      const flush=()=>{if(segment.length)markup+='<polyline class="chart-line" points="'+segment.join(' ')+'"/>';segment=[]};
+      for(const r of rows){if(!Number.isFinite(r.offset_ms)){flush();continue}segment.push(x(r)+','+y(r));markup+='<circle cx="'+x(r)+'" cy="'+y(r)+'" r="3" fill="#36dec3"><title>'+escapeHtml(r.started_at_utc+' '+r.offset_ms+' ms')+'</title></circle>'}flush();
+      if(!valid.length)markup+='<text class="axis-label" x="100" y="80">尚无有效偏移样本</text>';
+      if(rows.length)markup+='<text class="axis-label" x="65" y="175">'+escapeHtml(new Date(t0).toLocaleTimeString('zh-CN',{timeZone:'Asia/Shanghai',hour12:false}))+'</text><text class="axis-label" x="790" y="175">'+escapeHtml(new Date(t1).toLocaleTimeString('zh-CN',{timeZone:'Asia/Shanghai',hour12:false}))+'</text>';
+      svg.innerHTML=markup;
+    }
+    async function refreshClock(){const requested=clockManualDate?$('clock-date').value:'';try{const data=await getJson('/api/clock-history'+(requested?'?date='+encodeURIComponent(requested):''));if(requested!==(clockManualDate?$('clock-date').value:''))return;clockData=data;$('clock-date').value=data.date;renderClock()}catch(error){$('clock-summary').textContent='检测记录读取失败：'+error.message}}
+    $('clock-date').addEventListener('change',()=>{clockManualDate=Boolean($('clock-date').value);refreshClock()});
+    $('clock-source').addEventListener('change',renderClock);
+    refreshClock();setInterval(refreshClock,30000);
     function renderTimeSync(data){
       const operation=data.operation||{},detection=data.detection||{},windowsOperation=operation.windows||{},linuxOperation=operation.linux||{};
       $('windows-operation-title').textContent=windowsOperation.title||'Windows宿主对时';$('linux-operation-title').textContent=linuxOperation.title||'Leader原生Linux对时';$('windows-command').textContent=windowsOperation.command||'未配置';$('linux-command').textContent=linuxOperation.command||'未配置';$('operation-message').textContent=operation.message||'Dashboard只读，不直接修改系统时间。';

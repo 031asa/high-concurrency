@@ -236,6 +236,37 @@ python scripts/analyze_archive.py --run-dir result/aeron-mvp/RUN_ID --date 2026-
 建议选择已停止的批次，读取运行中归档只是非原子快照，可能遇到不完整帧。
 只读原始文件、不启动服务、不自动判断丢包；序号连续不代表持久化前无丢失。
 间隔需人工结合休市、回调与进程日志核验。报告输出必须位于原始运行目录之外。
+# 系统时钟只读检测与留档
+
+独立采样不修改系统时间，不依赖行情回调，也不要求后台 chrony 已同步。使用 chronyd **大写 `-Q`**；不要改成会校时的小写 `-q`。Linux/容器须有 chronyd（Ubuntu 软件包 chrony），运行采样无需 sudo 或 SYS_TIME 权限。依据：https://chrony-project.org/doc/latest/chronyd.html。
+
+在已激活项目 Conda 环境的仓库根目录运行一次：
+
+```bash
+python scripts/time_probe.py --config config/time_authority.tencent-south-china-fallback.conf
+```
+
+持续采样（默认建议300秒，多授时源逐个独立记录）：
+
+```bash
+python scripts/time_probe.py --config config/time_authority.tencent-south-china-fallback.conf --interval 300
+```
+
+Linux/WSL 用户服务安装及开机用户会话自动运行：
+
+```bash
+python scripts/install_time_probe_service.py --config config/time_authority.tencent-south-china-fallback.conf --interval 300
+systemctl --user status ydtrader-time-probe.service
+journalctl --user -u ydtrader-time-probe.service -n 30
+```
+
+仅在 Linux 用户服务管理器运行期间采样；Windows关机/睡眠、WSL关闭或网络断开不可能保证持续采样。可用 `systemctl --user disable --now ydtrader-time-probe.service` 停止。容器无systemd时用上述持续命令由容器进程管理器托管；持久挂载 `result/time-probes`。看板与采样分容器时共享该目录，看板只需只读挂载。
+
+Dashboard 新增“系统时钟检测留档”，可选北京时间日期及主机/授时源，展示偏移曲线、当天均值、最大绝对偏移、失败/超限次数，最近100条原始证据。`GET /api/clock-history?date=2026-09-08` 返回当天全部记录；默认当天，日期缺数据不回退。`--clock-history-root` 可设置看板读取目录，须对应采样 `--output-root`。页面刷新不会触发网络探测；原有双端对时报告不被本采样覆盖。
+
+证据存储：`result/time-probes/YYYY-MM-DD/<probe_id>.json`，一条一文件、原子发布并fsync，不自动删除历史。记录UTC采样起止、北京时间日期、执行主机、配置目标NTP、阈值、正负偏移、退出码、原始输出。偏移正值表示本机落后授时源；均值按主机与源分开，包含超限有效样本，失败值null不参与均值。duration_ms是整个探测耗时，不是RTT；RTT/不确定度不可得时留null。该公开测试NTP不是交易所授时源。容器hostname不是物理宿主身份，跨主机核验需额外记录部署对应关系。
+
+历史报告可读取相同日期的JSON留档，保留失败、超限和缺测事实；不得用今天检测结果回填上周，也不得将偏移直接从绝对行情观测差中相减。本功能不自动改写既有PDF。
 
 ## Redis 交易兼容入口
 

@@ -12,6 +12,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional
 from urllib.parse import parse_qs, urlparse
+from scripts.time_probe import history as collect_clock_history
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -547,6 +548,7 @@ def collect_status(result_root: Path, source: Optional[str] = None) -> Dict[str,
 
 
 class DashboardHandler(BaseHTTPRequestHandler):
+    clock_history_root = PROJECT_ROOT / "result" / "time-probes"
     result_root = DEFAULT_RESULT_ROOT
     time_report_root = DEFAULT_TIME_REPORT_ROOT
     time_report_max_age_seconds = DEFAULT_TIME_REPORT_MAX_AGE_SECONDS
@@ -567,6 +569,15 @@ class DashboardHandler(BaseHTTPRequestHandler):
                 HTTPStatus.OK,
                 collect_time_sync_status(self.time_report_root, max_age_seconds=self.time_report_max_age_seconds),
             )
+            return
+        if path == "/api/clock-history":
+            day = parse_qs(request.query).get("date", [None])[0]
+            try:
+                payload = collect_clock_history(self.clock_history_root, day)
+            except ValueError as error:
+                self._send_json(HTTPStatus.BAD_REQUEST, {"error": str(error)})
+                return
+            self._send_json(HTTPStatus.OK, payload)
             return
         if path == "/healthz":
             self._send_json(HTTPStatus.OK, {"status": "ok"})
@@ -596,6 +607,7 @@ def parse_args(argv: Optional[Iterable[str]] = None) -> argparse.Namespace:
     parser.add_argument("--port", type=int, default=8080)
     parser.add_argument("--result-root", type=Path, default=DEFAULT_RESULT_ROOT)
     parser.add_argument("--time-report-root", type=Path, default=DEFAULT_TIME_REPORT_ROOT)
+    parser.add_argument("--clock-history-root", type=Path, default=PROJECT_ROOT / "result/time-probes")
     parser.add_argument(
         "--time-report-max-age-seconds",
         type=int,
@@ -608,6 +620,7 @@ def main(argv: Optional[Iterable[str]] = None) -> int:
     args = parse_args(argv)
     DashboardHandler.result_root = args.result_root.resolve()
     DashboardHandler.time_report_root = args.time_report_root.resolve()
+    DashboardHandler.clock_history_root = args.clock_history_root.resolve()
     DashboardHandler.time_report_max_age_seconds = max(1, args.time_report_max_age_seconds)
     server = ThreadingHTTPServer((args.host, args.port), DashboardHandler)
     print(
