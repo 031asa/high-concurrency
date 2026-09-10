@@ -28,12 +28,32 @@
     .charts{display:grid;grid-template-columns:1.55fr 1fr;gap:12px;margin-bottom:12px}.chart-card{min-height:300px;padding:18px 19px 14px}svg{width:100%;height:220px;overflow:visible}.grid-line{stroke:#203742;stroke-width:1}.axis-label{fill:#78959d;font-size:10px}.chart-line{fill:none;stroke:var(--cyan);stroke-width:2.2;vector-effect:non-scaling-stroke}#observation-line{stroke:var(--blue)}
     .table-card{padding:18px;margin-bottom:12px}.table-card:last-child{margin-bottom:0}.section-head{display:flex;align-items:flex-start;justify-content:space-between;gap:18px}.table-wrap{overflow-x:auto}table{width:100%;border-collapse:collapse;margin-top:11px;font-size:12px}th,td{padding:11px 9px;border-top:1px solid var(--line);text-align:right;font-variant-numeric:tabular-nums}th:first-child,td:first-child{text-align:left}th{color:var(--muted);font-size:10px;font-weight:650;white-space:nowrap}.report-table td:nth-child(2){text-align:left}.latency-table{min-width:850px}.latency-table td:first-child{white-space:nowrap}.empty-row{color:var(--muted);text-align:center!important}.depth-control{display:flex;align-items:center;gap:8px;color:var(--muted);font-size:11px;white-space:nowrap}.depth-control select{padding:6px 9px;color:var(--text);border:1px solid var(--line);border-radius:8px;background:var(--panel-soft)}.bid-value,.ok{color:var(--cyan)}.ask-value,.bad{color:var(--red)}footer{display:flex;justify-content:space-between;gap:16px;margin-top:15px;color:var(--muted);font-size:10px}
     @media(max-width:1060px){.time-layout{grid-template-columns:1fr}.detection-grid{grid-template-columns:repeat(2,1fr)}.metrics{grid-template-columns:repeat(2,1fr)}.charts{grid-template-columns:1fr}}@media(max-width:760px){.shell{width:min(100% - 22px,1480px);padding-top:20px}header,.domain-head{flex-direction:column}.domain-rule{max-width:none}.runbar{grid-template-columns:repeat(2,1fr)}.run-cell:first-child{grid-column:span 2}}@media(max-width:520px){.detection-grid,.metrics,.runbar{grid-template-columns:1fr}.run-cell:first-child{grid-column:auto}.command-row{grid-template-columns:1fr}.copy-button{padding:8px}footer{flex-direction:column}}
+    [hidden]{display:none!important}.replay-controls{display:flex;gap:14px;align-items:center;flex-wrap:wrap;margin-bottom:16px}.replay-controls select,.replay-controls button{color:var(--text);background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:9px}.replay-controls label{color:var(--muted);font-size:12px}.replay-controls input{flex:1;min-width:160px}.replay-mode .shell>header{display:none}.replay-mode .shell>.domain{display:none}.replay-mode #replay-view{display:block}#replay-details{white-space:pre-wrap;overflow-wrap:anywhere;font-size:11px;color:var(--muted)}
   </style>
 </head>
 <body>
   <main class="shell">
     <header><div><div class="eyebrow">YDTrader / Clock & Market Observatory</div><h1>授时与行情观测中心</h1><div class="subtitle">权威授时负责校准和检测系统时钟；行情系统只测量行情事件时间与本机接收时间的观测差。两个域独立采集、独立判定。</div></div><div class="status-pill"><span id="status-dot" class="dot"></span><span id="status-text">等待行情数据</span></div></header>
 
+    <nav class="replay-controls"><button id="live-mode">实时</button><button id="replay-mode">历史回放</button></nav>
+    <section id="replay-view" hidden>
+      <h1>历史行情回放</h1><p class="section-meta">只读浏览已归档行情 · 不连接柜台，不向策略或ZMQ分发</p>
+      <div class="panel">
+        <div class="replay-controls">
+          <label>北京时间日期 <select id="replay-date"></select></label>
+          <label>行情源 <select id="replay-source"></select></label>
+          <label>合约 <select id="replay-contract"></select></label>
+          <button id="replay-refresh">刷新归档快照</button>
+        </div>
+        <div class="replay-controls"><button id="replay-play">播放</button><select id="replay-speed" aria-label="回放速度"><option value="1">1×</option><option value="10" selected>10×</option><option value="60">60×</option></select><input id="replay-seek" aria-label="回放时间进度" type="range" min="0" max="10000" value="0"><span id="replay-time">—</span></div>
+        <p id="replay-state" class="section-meta">数据加载中</p>
+      </div>
+      <div class="charts" style="margin-top:14px">
+        <article class="chart-card"><div class="section-title">当前价格 <span id="replay-price">—</span></div><p id="replay-times" class="section-meta">—</p><svg id="replay-chart" viewBox="0 0 900 220" role="img" aria-label="已播放行情价格曲线"></svg></article>
+        <article class="table-card"><h3 class="section-title">买卖盘口</h3><table><thead><tr><th>档位</th><th>买价</th><th>买量</th><th>卖价</th><th>卖量</th></tr></thead><tbody id="replay-depth"></tbody></table></article>
+      </div>
+      <details class="panel"><summary>数据详情</summary><pre id="replay-details"></pre></details>
+    </section>
     <section class="domain domain-clock">
       <div class="domain-head"><div><div class="domain-kicker">01 · 权威时钟域</div><h2 class="domain-title">系统对时</h2><div class="domain-description">对时操作负责校准；对时检测负责验证。检测数据只来自NTP/PTP标准报告。</div></div><div class="domain-rule">交易所行情不是授时源。行情时间戳不得用于修改系统时钟，也不得替代NTP/PTP检测结果。</div></div>
       <div class="domain-body time-layout">
@@ -94,6 +114,7 @@
     </section>
   </main>
   <script>
+    let replayMode=false;
     const $=id=>document.getElementById(id);
     const number=(value,digits=0)=>value===null||value===undefined||value===''||Number.isNaN(Number(value))?'—':Number(value).toLocaleString('zh-CN',{maximumFractionDigits:digits,minimumFractionDigits:digits});
     const escapeHtml=value=>String(value??'').replace(/[&<>"']/g,character=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'})[character]);
@@ -124,7 +145,7 @@
       if(rows.length)markup+='<text class="axis-label" x="65" y="175">'+escapeHtml(new Date(t0).toLocaleTimeString('zh-CN',{timeZone:'Asia/Shanghai',hour12:false}))+'</text><text class="axis-label" x="790" y="175">'+escapeHtml(new Date(t1).toLocaleTimeString('zh-CN',{timeZone:'Asia/Shanghai',hour12:false}))+'</text>';
       svg.innerHTML=markup;
     }
-    async function refreshClock(){const requested=clockManualDate?$('clock-date').value:'';try{const data=await getJson('/api/clock-history'+(requested?'?date='+encodeURIComponent(requested):''));if(requested!==(clockManualDate?$('clock-date').value:''))return;clockData=data;$('clock-date').value=data.date;renderClock()}catch(error){$('clock-summary').textContent='检测记录读取失败：'+error.message}}
+    async function refreshClock(){if(replayMode)return;const requested=clockManualDate?$('clock-date').value:'';try{const data=await getJson('/api/clock-history'+(requested?'?date='+encodeURIComponent(requested):''));if(requested!==(clockManualDate?$('clock-date').value:''))return;if(replayMode)return;clockData=data;$('clock-date').value=data.date;renderClock()}catch(error){$('clock-summary').textContent='检测记录读取失败：'+error.message}}
     $('clock-date').addEventListener('change',()=>{clockManualDate=Boolean($('clock-date').value);refreshClock()});
     $('clock-source').addEventListener('change',renderClock);
     refreshClock();setInterval(refreshClock,30000);
@@ -154,8 +175,75 @@
       const quote=compute.quote||{};latestQuote=quote;$('quote-sequence').textContent=number(quote.sequence);$('quote-instrument').textContent=quote.instrument||'等待行情';$('quote-day').textContent=quote.trading_day||'—';$('quote-time').textContent=quote.market_time||'—';$('quote-last').textContent=number(quote.last_price,4);renderDepth(quote);chart($('rate-chart'),data.series||[],'rate_per_second','rate-line');chart($('observation-chart'),hidden?[]:(data.series||[]),'observed_delta_ms','observation-line',hidden?'历史回放不展示观测差':dailyMessage);$('updated').textContent=`刷新于 ${new Date(data.generated_at_ms).toLocaleTimeString('zh-CN')}`;
     }
     async function getJson(path){const response=await fetch(path,{cache:'no-store'});if(!response.ok)throw new Error(`${path} HTTP ${response.status}`);return response.json()}
-    async function refresh(){const sequence=++refreshSequence,marketPath=selectedSource?`/api/status?source=${encodeURIComponent(selectedSource)}`:'/api/status',[market,timeSync]=await Promise.allSettled([getJson(marketPath),getJson('/api/time-sync')]);if(sequence!==refreshSequence)return;if(market.status==='fulfilled')renderMarket(market.value);else{$('status-text').textContent=`行情接口失败：${market.reason.message}`;$('status-dot').className='dot failed'}if(timeSync.status==='fulfilled')renderTimeSync(timeSync.value);else{$('time-status').textContent='检测接口失败';$('time-status').className='mini-pill fail'}}
+    async function refresh(){if(replayMode)return;const sequence=++refreshSequence,marketPath=selectedSource?`/api/status?source=${encodeURIComponent(selectedSource)}`:'/api/status',[market,timeSync]=await Promise.allSettled([getJson(marketPath),getJson('/api/time-sync')]);if(replayMode||sequence!==refreshSequence)return;if(market.status==='fulfilled')renderMarket(market.value);else{$('status-text').textContent=`行情接口失败：${market.reason.message}`;$('status-dot').className='dot failed'}if(timeSync.status==='fulfilled')renderTimeSync(timeSync.value);else{$('time-status').textContent='检测接口失败';$('time-status').className='mini-pill fail'}}
     $('source-select').addEventListener('change',event=>{selectedSource=event.target.value;refresh()});$('depth-select').addEventListener('change',()=>renderDepth(latestQuote));renderDepth({});refresh();setInterval(refresh,1000);
+
+    const replay={token:0,playing:false,busy:false,start:0n,end:0n,time:0n,next:null,data:null,stamp:0,points:[],quoteTime:0n};
+    function pauseReplay(){replay.playing=false;$('replay-play').textContent='播放'}
+    function replayParams(){return new URLSearchParams({date:$('replay-date').value,source:$('replay-source').value,contract:$('replay-contract').value,time:String(replay.time)})}
+    function replayOptions(id,values,selected){const node=$(id);node.replaceChildren(...values.map(value=>{const option=document.createElement('option');option.value=value;option.textContent=id==='replay-source'?value.toUpperCase():value;return option}));node.value=selected;node.disabled=!values.length}
+    function clearReplay(){pauseReplay();replay.data=null;replay.next=null;$('replay-price').textContent='—';$('replay-times').textContent='—';$('replay-time').textContent='—';$('replay-depth').replaceChildren();$('replay-chart').replaceChildren();$('replay-details').textContent='';$('replay-seek').value=0}
+    async function loadReplay(reset=false){
+      const token=++replay.token;clearReplay();$('replay-state').textContent='数据加载中';
+      try{
+        const params=reset?'':('?'+replayParams());
+        const data=await getJson('/api/replay/catalog'+params);
+        if(token!==replay.token||!replayMode)return;
+        if(data.status==='loading'||data.status==='idle'){setTimeout(()=>{if(token===replay.token&&replayMode)loadReplay(reset)},1000);return}
+        if(data.status!=='ready')throw new Error(data.error||'索引不可用');
+        replayOptions('replay-date',data.dates,data.date);replayOptions('replay-source',data.sources,data.source);replayOptions('replay-contract',data.contracts,data.contract);
+        replay.start=BigInt(data.start);replay.end=BigInt(data.end);replay.time=replay.start;
+        $('replay-state').textContent=data.count?'已暂停 · 截至加载时刻 '+data.loaded_at:'没有数据';
+        if(data.count){const curveParams=replayParams();curveParams.set('time',data.end);const curve=await getJson('/api/replay/curve?'+curveParams);if(token!==replay.token||!replayMode)return;replay.points=curve.points||[];replay.data=data;await showReplay(token)}
+      }catch(error){if(token===replay.token)$('replay-state').textContent='读取失败：'+error.message}
+    }
+    function drawReplay(points){
+      const svg=$('replay-chart'),valid=points.filter(p=>Number.isFinite(p[1]));
+      if(!valid.length){svg.replaceChildren();return}
+      const prices=valid.map(p=>p[1]),lo=Math.min(...prices),hi=Math.max(...prices),span=Math.max(hi-lo,0.0001);
+      const x=t=>65+Number(BigInt(t)-replay.start)/Math.max(1,Number(replay.end-replay.start))*810;
+      const y=p=>180-(p-lo)/span*155;
+      svg.innerHTML='<text class="axis-label" x="0" y="25">'+number(hi,4)+'</text><text class="axis-label" x="0" y="180">'+number(lo,4)+'</text><polyline class="chart-line" points="'+valid.map(p=>x(p[0])+','+y(p[1])).join(' ')+'"/>';
+    }
+    async function showReplay(token,position=null){
+      const params=replayParams();
+      if(position)params.set('time',position);else if(replay.time===replay.start)params.set('time',String(replay.start)+':0');
+      const data=await getJson('/api/replay/snapshot?'+params);
+      if(token!==replay.token||!replayMode)return;
+      if(data.status!=='ready'||!data.quote)throw new Error(data.error||'没有可用行情');
+      if(data.generation!==replay.data.generation)throw new Error('索引已刷新，请重新选择日期加载快照');
+      replay.next=data.next?BigInt(data.next):null;
+      replay.nextPosition=data.next_position;
+      const q=data.quote;
+      replay.quoteTime=BigInt(q.received);
+      $('replay-price').textContent=number(q.price,4);$('replay-times').textContent='行情时间：'+q.market_time+' · 原始接收：'+q.receive_time;
+      $('replay-time').textContent=new Date(Number(replay.time/1000000n)).toLocaleString('zh-CN',{timeZone:'Asia/Shanghai',hour12:false});
+      $('replay-seek').value=Number((replay.time-replay.start)*10000n/((replay.end-replay.start)||1n));
+      $('replay-depth').innerHTML=q.depth.map((r,i)=>'<tr><td>'+(i+1)+'</td>'+r.map((v,j)=>'<td>'+number(v,j%2===0?4:0)+'</td>').join('')+'</tr>').join('');
+      $('replay-details').textContent=JSON.stringify({loaded_at:data.loaded_at,incomplete:data.incomplete,warnings:data.warnings,batches:replay.data.details,record:q},null,2);
+      if(data.incomplete&&!$('replay-state').textContent.includes('归档不完整'))$('replay-state').textContent+=' · 归档不完整，详见数据详情';
+      drawReplay([...replay.points.filter(p=>BigInt(p[0])<=replay.quoteTime),[q.received,q.price]]);
+    }
+    $('replay-mode').onclick=()=>{replayMode=true;refreshSequence++;document.body.classList.add('replay-mode');$('replay-view').hidden=false;loadReplay(true)};
+    $('live-mode').onclick=()=>{replayMode=false;replay.token++;pauseReplay();document.body.classList.remove('replay-mode');$('replay-view').hidden=true;refresh();refreshClock()};
+    $('replay-date').onchange=()=>{$('replay-source').value='';$('replay-contract').value='';loadReplay()};
+    $('replay-source').onchange=()=>{$('replay-contract').value='';loadReplay()};
+    $('replay-contract').onchange=()=>loadReplay();
+    $('replay-refresh').onclick=async()=>{pauseReplay();replay.token++;try{const response=await fetch('/api/replay/refresh',{method:'POST'});if(!response.ok)throw new Error('刷新请求失败');loadReplay()}catch(error){$('replay-state').textContent=error.message}};
+    $('replay-play').onclick=()=>{if(!replay.data?.count)return;if(replay.playing){pauseReplay();$('replay-state').textContent='已暂停';return}if(replay.time>=replay.end)replay.time=replay.start;replay.playing=true;replay.stamp=performance.now();$('replay-play').textContent='暂停';$('replay-state').textContent='播放中'};
+    $('replay-seek').oninput=()=>{pauseReplay();replay.token++;replay.time=replay.start+(replay.end-replay.start)*BigInt($('replay-seek').value)/10000n};
+    $('replay-seek').onchange=()=>{const token=replay.token;if(replay.data)showReplay(token).catch(e=>{if(token===replay.token)$('replay-state').textContent=e.message})};
+    setInterval(async()=>{
+      if(!replayMode||!replay.playing||replay.busy)return;
+      replay.busy=true;const token=replay.token,now=performance.now();
+      const position=replay.next===replay.quoteTime?replay.nextPosition:null;
+      const step=BigInt(Math.round((now-replay.stamp)*Number($('replay-speed').value)*1000000));replay.stamp=now;
+      replay.time+=step;
+      if(replay.next&&replay.next-replay.quoteTime>60000000000n&&replay.time<replay.next){replay.time=replay.next;$('replay-state').textContent='跳过无记录区间（不判定休市或断线）'}
+      if(!position&&replay.time>=replay.end){replay.time=replay.end;pauseReplay();$('replay-state').textContent='已结束'}
+      if(position)replay.time=replay.quoteTime;
+      try{await showReplay(token,position)}catch(error){if(token===replay.token){pauseReplay();$('replay-state').textContent='读取失败：'+error.message}}finally{replay.busy=false}
+    },250);
   </script>
 </body>
 </html>

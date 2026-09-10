@@ -5,6 +5,8 @@ from __future__ import annotations
 
 import argparse
 import json
+import sqlite3
+import struct
 import time
 from datetime import datetime, timezone, timedelta
 from http import HTTPStatus
@@ -13,6 +15,7 @@ from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional
 from urllib.parse import parse_qs, urlparse
 from scripts.time_probe import history as collect_clock_history
+from dashboard.replay import ReplayStore
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -548,6 +551,7 @@ def collect_status(result_root: Path, source: Optional[str] = None) -> Dict[str,
 
 
 class DashboardHandler(BaseHTTPRequestHandler):
+    replay_store = None
     clock_history_root = PROJECT_ROOT / "result" / "time-probes"
     result_root = DEFAULT_RESULT_ROOT
     time_report_root = DEFAULT_TIME_REPORT_ROOT
@@ -557,6 +561,19 @@ class DashboardHandler(BaseHTTPRequestHandler):
     def do_GET(self) -> None:  # noqa: N802 - stdlib API name
         request = urlparse(self.path)
         path = request.path
+        if path.startswith("/api/replay/"):
+            kind = path.rsplit("/", 1)[-1]
+            if kind not in {"catalog", "curve", "snapshot"}:
+                self._send_json(HTTPStatus.NOT_FOUND, {"error": "not found"})
+                return
+            try:
+                params = {key: values[0] for key, values in parse_qs(request.query).items()}
+                if set(params) - {"date", "source", "contract", "time"}:
+                    raise ValueError("不支持的回放参数")
+                self._send_json(HTTPStatus.OK, self.replay_store.query(kind, params))
+            except (ValueError, OSError, sqlite3.Error, struct.error) as error:
+                self._send_json(HTTPStatus.BAD_REQUEST, {"error": str(error)})
+            return
         if path in {"/", "/index.html"}:
             self._send_bytes(HTTPStatus.OK, "text/html; charset=utf-8", self.index_file.read_bytes())
             return
@@ -587,6 +604,13 @@ class DashboardHandler(BaseHTTPRequestHandler):
     def log_message(self, fmt: str, *args: object) -> None:
         print("DASHBOARD_HTTP " + (fmt % args), flush=True)
 
+    def do_POST(self):
+        if self.path == "/api/replay/refresh":
+            self.replay_store.refresh()
+            self._send_json(HTTPStatus.ACCEPTED, {"status": "loading"})
+        else:
+            self._send_json(HTTPStatus.NOT_FOUND, {"error": "not found"})
+
     def _send_json(self, status: HTTPStatus, payload: Dict[str, Any]) -> None:
         body = json.dumps(payload, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
         self._send_bytes(status, "application/json; charset=utf-8", body)
@@ -606,6 +630,7 @@ def parse_args(argv: Optional[Iterable[str]] = None) -> argparse.Namespace:
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--port", type=int, default=8080)
     parser.add_argument("--result-root", type=Path, default=DEFAULT_RESULT_ROOT)
+    parser.add_argument("--replay-cache-root", type=Path, default=PROJECT_ROOT / "result/dashboard-replay")
     parser.add_argument("--time-report-root", type=Path, default=DEFAULT_TIME_REPORT_ROOT)
     parser.add_argument("--clock-history-root", type=Path, default=PROJECT_ROOT / "result/time-probes")
     parser.add_argument(
@@ -619,6 +644,7 @@ def parse_args(argv: Optional[Iterable[str]] = None) -> argparse.Namespace:
 def main(argv: Optional[Iterable[str]] = None) -> int:
     args = parse_args(argv)
     DashboardHandler.result_root = args.result_root.resolve()
+    DashboardHandler.replay_store = ReplayStore(args.result_root, args.replay_cache_root)
     DashboardHandler.time_report_root = args.time_report_root.resolve()
     DashboardHandler.clock_history_root = args.clock_history_root.resolve()
     DashboardHandler.time_report_max_age_seconds = max(1, args.time_report_max_age_seconds)

@@ -5,6 +5,7 @@ No broker connection, Java process, or third-party Python package is required.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import math
 import mmap
@@ -31,16 +32,19 @@ def iso(ns):
     return datetime.fromtimestamp(ns / NS, CHINA).isoformat() if day_of(ns) else None
 
 
-def quotes(path):
+def quotes(path, *, snapshot_size=None, include_digest=False):
     """Frame lengths exclude alignment padding. Zero length marks unused tail.
 
-    Only this project's complete, unfragmented schema 701/template 1/v3 is
+    Only this project's complete, unfragmented schema 701/template 1/v2-v3 is
     supported. Unsupported or truncated frames fail loudly instead of returning
     misleading statistics. Analyse stopped runs; never truncate an open archive.
+    Replay may bound its read to snapshot_size and request per-frame digests;
+    the default analysis output remains unchanged.
     """
-    if not path.stat().st_size:
+    size = path.stat().st_size if snapshot_size is None else snapshot_size
+    if not size:
         return
-    with path.open("rb") as stream, mmap.mmap(stream.fileno(), 0, access=mmap.ACCESS_READ) as data:
+    with path.open("rb") as stream, mmap.mmap(stream.fileno(), size, access=mmap.ACCESS_READ) as data:
         offset = 0
         while offset + 32 <= len(data):
             length, version, flags, kind = struct.unpack_from("<iBBH", data, offset)
@@ -70,12 +74,17 @@ def quotes(path):
                     raise ValueError(f"{path}:{offset}: invalid string length")
                 fields.append(data[cursor:cursor + size].decode("utf-8"))
                 cursor += size
+            if include_digest and cursor != end:
+                raise ValueError(f"{path}:{offset}: unexpected trailing SBE bytes")
             sequence, market, received, price = struct.unpack_from("<QQQd", data, base)
+            digest = {"digest": hashlib.sha256(data[offset + 32:end]).hexdigest()} if include_digest else {}
             yield dict(session=fields[0], sequence=sequence, market=market, received=received,
                        price=price if math.isfinite(price) else None,
                        valid=data[base + 64] == 1, contract=fields[1],
-                       source=fields[7] if sbe_version == 3 else "", market_raw=fields[3], frame_offset=offset)
+                       source=fields[7] if sbe_version == 3 else "", market_raw=fields[3], frame_offset=offset, **digest)
             offset += (length + 31) & ~31
+        if include_digest and offset < len(data) and len(data) - offset < 32 and any(data[offset:]):
+            raise ValueError(f"{path}:{offset}: incomplete tail header")
 
 
 def stats(db, where, args):

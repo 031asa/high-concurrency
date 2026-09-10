@@ -29,6 +29,7 @@ nuitka_include_modules = [
   "aeron_mvp.ydapi_bridge",
   "aeron_mvp.zmq_market_probe",
   "dashboard.server",
+  "dashboard.replay",
 ]
 nuitka_include_packages = ["redis", "timer_pdf", "reportlab", "pypdf"]
 
@@ -43,7 +44,7 @@ aeron_mvp = [
   "ydapi_bridge",
   "zmq_market_probe",
 ]
-dashboard = ["server"]
+dashboard = ["server", "replay"]
 
 [container]
 base_image = "ubuntu:24.04"
