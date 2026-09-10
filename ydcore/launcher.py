@@ -16,6 +16,8 @@ BUSINESS_MODULES = {
 
 # Import on demand: top-level help must not load native broker APIs or start services.
 APPLICATION_MODULES = {
+    "analyze-archive": "ydcore.archive_analysis",
+    "yd-redis-server": "ydcore.yd_redis_server",
     "redis-trader": "ydcore.yd_redis_server",
     "dashboard": "dashboard.server",
     "source-config": "aeron_mvp.source_config",
@@ -41,6 +43,8 @@ SHELL_HELP = {
 USAGE = """usage: ydtrader <command> [options]
 
 commands:
+  analyze-archive [options]    read-only analysis of recorded market data
+  yd-redis-server [options]    alias for redis-trader
   redis-trader [options]      independent Redis trading service
   order [original options]     trading, control, query, and cancel functions
   monitor [original options]   independent account monitor

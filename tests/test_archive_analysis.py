@@ -6,7 +6,7 @@ from pathlib import Path
 from datetime import datetime
 import pytest
 
-SPEC = importlib.util.spec_from_file_location("archive_analysis", Path(__file__).parents[1] / "scripts/analyze_archive.py")
+SPEC = importlib.util.spec_from_file_location("archive_analysis", Path(__file__).parents[1] / "ydcore/archive_analysis.py")
 module = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(module)
 

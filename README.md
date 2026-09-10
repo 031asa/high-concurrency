@@ -221,7 +221,7 @@ Aeron 接受不等于已经刷盘，计数差也不能直接当作永久丢包�
 在项目根目录、Conda 环境中手动执行（替换 RUN_ID）：
 
 ```bash
-python scripts/analyze_archive.py --run-dir result/aeron-mvp/RUN_ID --date 2026-09-07 --output result/reports/archive-analysis.json
+python main.py analyze-archive --run-dir result/aeron-mvp/RUN_ID --date 2026-09-07 --output result/reports/archive-analysis.json
 ```
 
 省略 `--date` 分析整个批次，省略 `--output` 在终端输出 JSON。
@@ -248,11 +248,16 @@ Redis 服务迁自同一提交的 `scripts/yd_redis_server.py`，共用这一份
 ```bash
 python main.py order --help
 python main.py redis-trader --help
-python scripts/yd_redis_server.py --help
+python main.py yd-redis-server --help
 ```
 
 需要启动交易服务时，在项目根目录执行 `python main.py redis-trader`，或使用兼容脚本
-`python scripts/yd_redis_server.py`。这会连接配置的柜台，并消费真实交易指令。
+`python main.py yd-redis-server`。这会连接配置的柜台，并消费真实交易指令。
+
+打包兼容：`analyze-archive`、`yd-redis-server` 均由根目录 `main.py` 延迟导入
+受保护的 `ydcore` 模块；原有 `redis-trader` 命令保持不变。
+两个 `scripts/*.py` 兼容入口仅供源码运行，发布时由 `exclude_paths` 排除，
+不再要求容器中存在这些明文脚本。参数原样传递；顶层及子命令 `--help` 不连接柜台。
 两个入口共用 `--account-config`、`--api-config`、`--startup-timeout`（默认 60 秒）。
 Redis 参数仍为 `REDIS_HOST`、`REDIS_PORT`、`REDIS_DB`，默认 `127.0.0.1:6379/0`。
 同一账号队列只运行一个消费入口；行情和 Dashboard 不会自动启动该服务。

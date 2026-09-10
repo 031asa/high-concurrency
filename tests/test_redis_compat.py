@@ -244,7 +244,7 @@ def test_main_preserves_config_arguments(gateway, monkeypatch):
     assert calls == [dict(account_config_path='a', api_config_path='b'), 4, 'run']
 
 
-@pytest.mark.parametrize('args', [['main.py', 'order'], ['main.py', 'redis-trader'], ['scripts/yd_redis_server.py']])
+@pytest.mark.parametrize('args', [['main.py', 'order'], ['main.py', 'redis-trader'], ['main.py', 'yd-redis-server'], ['scripts/yd_redis_server.py']])
 def test_help_never_connects_or_loads_sdk(tmp_path, args):
     root = Path(__file__).resolve().parents[1]
     (tmp_path / 'sitecustomize.py').write_text('import socket\ndef blocked(*a, **k): raise AssertionError("network attempted")\nsocket.socket.connect = blocked\n')
