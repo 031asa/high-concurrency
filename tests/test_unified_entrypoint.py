@@ -220,6 +220,8 @@ def test_compiled_modules_work_without_their_python_sources(tmp_path):
     # Preserve local Python support modules used by the current dashboard.
     (app / "scripts").mkdir()
     for support in (ROOT / "scripts").glob("*.py"):
+        if support.name in {"analyze_archive.py", "yd_redis_server.py"}:
+            continue  # These source-only wrappers are excluded from releases.
         shutil.copy2(support, app / "scripts" / support.name)
     shutil.copy2(ENTRY, app / ENTRY.name)
     entry = app / ENTRY.name
@@ -232,6 +234,7 @@ def test_compiled_modules_work_without_their_python_sources(tmp_path):
     for arguments, result in zip(commands, before):
         assert result.returncode == 0, (arguments, result.returncode, result.stderr)
     names = ["ydcore.launcher", "ydcore.trading", "aeron_mvp.market_wire", "aeron_mvp.ctp_bridge", *launcher.APPLICATION_MODULES.values()]
+    names = list(dict.fromkeys(names))
     sources = [name.replace(".", "/") + ".py" for name in names]
     setup = tmp_path / "setup_extensions.py"
     setup.write_text(

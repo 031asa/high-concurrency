@@ -10,7 +10,7 @@ from setuptools import Extension, setup
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
-CORE_MODULES = ("launcher", "trading", "monitoring", "marketdata", "yd_redis_server")
+CORE_MODULES = ("launcher", "trading", "monitoring", "marketdata", "yd_redis_server", "archive_analysis")
 
 
 def main(argv=None):
