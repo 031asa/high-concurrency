@@ -102,3 +102,32 @@ docker exec <容器名> ydtrader daily-report \
 可单独启动报告容器共享数据卷，不需要交易账号，不启动交易服务。
 宿主机systemd使用同样OnCalendar/Persistent设置，ExecStart替换为上面的docker exec绝对路径命令。
 `--catch-up-from`负责补齐多日，不能仅依赖Persistent的一次补触发。
+
+### 宿主机定时入口
+
+新增入口仅封装上述docker exec命令，沿用容器内原有日报锁和补报逻辑，不启动或重启任何行情服务：
+
+```bash
+bash timer_pdf/code/run_daily_docker.sh yd-market 2026-09-09 \
+  --input-root /opt/ydtrader/result/aeron-mvp \
+  --clock-root /opt/ydtrader/result/time-probes \
+  --output-root /opt/ydtrader/timer_pdf/pdf
+```
+
+`yd-market`替换为已有容器名，所有报告路径是容器内部路径。若可执行文件不在PATH，设置
+`YDTRADER_REPORT_EXECUTABLE=/opt/ydtrader/ydtrader`。容器须运行且宿主机调度用户须具有Docker访问权限。
+真实日期有效性由日报入口检查，Docker或报告失败的退出码原样传回，不伪报成功。
+
+现有宿主机systemd服务的ExecStart可使用以下形式（替换路径和容器名）：
+
+```ini
+ExecStart=/usr/bin/bash /absolute/project/timer_pdf/code/run_daily_docker.sh yd-market 2026-09-09 --input-root /opt/ydtrader/result/aeron-mvp --clock-root /opt/ydtrader/result/time-probes --output-root /opt/ydtrader/timer_pdf/pdf
+```
+
+对应timer沿用`OnCalendar=*-*-* 09:00:00 Asia/Shanghai`和`Persistent=true`。
+Linux直接运行与Docker定时入口二选一，不重复安装两套日报任务。
+
+### 版本范围
+
+v0.9.1基于v0.9.0，仅补充Docker定时入口、说明和测试；行情接入、Aeron、ZMQ代码不变。
+Git标签更新不会自动替换已构建镜像或已部署服务。
