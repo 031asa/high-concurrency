@@ -2,6 +2,8 @@
 set -euo pipefail
 
 PROJECT_ROOT=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
+python "$PROJECT_ROOT/main.py" version-info --write "$PROJECT_ROOT/build-version.json"
+python "$PROJECT_ROOT/main.py" version-info --format meta --write "$PROJECT_ROOT/build-version.meta"
 MVP_DIR="$PROJECT_ROOT/aeron_mvp"
 if [[ -n "${SECURE_RELEASE_BUILD_CACHE:-}" ]]; then
     export AERON_MVP_DEPS_DIR="$SECURE_RELEASE_BUILD_CACHE/aeron-mvp-deps"

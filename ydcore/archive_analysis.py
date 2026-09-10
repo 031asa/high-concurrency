@@ -54,14 +54,14 @@ def quotes(path):
             if kind != 1 or flags != 192 or length < 40:
                 raise ValueError(f"{path}:{offset}: unsupported or fragmented frame")
             block, template, schema, sbe_version = struct.unpack_from("<HHHH", data, offset + 32)
-            if (schema, template, sbe_version, block) != (701, 1, 3, 324):
+            if (schema, template, sbe_version, block) not in ((701, 1, 3, 324), (701, 1, 2, 194)):
                 raise ValueError(f"{path}:{offset}: unsupported SBE {schema}/{template}/{sbe_version}/{block}")
             base, end = offset + 40, offset + length
             cursor = base + block
             if cursor > end:
                 raise ValueError(f"{path}:{offset}: truncated SBE block")
             fields = []
-            for _ in range(8):
+            for _ in range(8 if sbe_version == 3 else 4):
                 if cursor + 2 > end:
                     raise ValueError(f"{path}:{offset}: truncated string length")
                 size = struct.unpack_from("<H", data, cursor)[0]
@@ -74,7 +74,7 @@ def quotes(path):
             yield dict(session=fields[0], sequence=sequence, market=market, received=received,
                        price=price if math.isfinite(price) else None,
                        valid=data[base + 64] == 1, contract=fields[1],
-                       source=fields[7], market_raw=fields[3])
+                       source=fields[7] if sbe_version == 3 else "", market_raw=fields[3], frame_offset=offset)
             offset += (length + 31) & ~31
 
 
@@ -122,7 +122,7 @@ def analyse(run_dir, selected_date=None):
                       "分位数为原始样本精确nearest-rank，标准差为总体标准差；非HdrHistogram近似。",
                       "累计延迟为本批次该实盘来源所有时间有效样本，含跨日快照；与Dashboard首笔过滤口径可能不同。",
                       "按session+sequence去重，不把不同序号的相同价格行情当重复。",
-                      "仅支持本项目从段首开始的未分片SBE v3归档；零帧视为未使用尾部，建议分析停止的批次。",
+                      "仅支持本项目从段首开始的未分片SBE v2/v3归档；零帧视为未使用尾部，建议分析停止的批次。",
                   ])
     # Disk-backed scratch storage keeps raw quote count out of Python RAM.
     with tempfile.TemporaryDirectory(prefix="aeron-analysis-") as scratch:

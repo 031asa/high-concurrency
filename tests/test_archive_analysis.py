@@ -30,6 +30,23 @@ def frame(seq, received, market, source="live", valid=True):
     return header + body + bytes((-length) % 32)
 
 
+def test_legacy_v2_quotes(tmp_path):
+    block = bytearray(194)
+    struct.pack_into("<QQQd", block, 0, 1, 100, 200, 123.5)
+    block[64] = 1
+    body = struct.pack("<HHHH", 194, 1, 701, 2) + block
+    for value in (b"session", b"IF2609", b"20260901", b"raw-time"):
+        body += struct.pack("<H", len(value)) + value
+    length = 32 + len(body)
+    header = bytearray(32)
+    struct.pack_into("<iBBH", header, 0, length, 0, 192, 1)
+    path = tmp_path / "0-0.rec"
+    path.write_bytes(header + body + bytes((-length) % 32))
+    rows = list(module.quotes(path))
+    assert len(rows) == 1 and rows[0]["market"] == 100
+    assert rows[0]["source"] == "" and rows[0]["contract"] == "IF2609"
+
+
 def make_run(tmp_path, frames):
     run = tmp_path / "run"
     (run / "archive").mkdir(parents=True)

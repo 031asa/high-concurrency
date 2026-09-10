@@ -116,12 +116,12 @@ def history(root, date=None):
             "unreadable_files": unreadable, "latest": rows[-1] if rows else None}
 
 
-def main():
+def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--config", type=Path, required=True)
     parser.add_argument("--output-root", type=Path, default=ROOT / "result/time-probes")
     parser.add_argument("--interval", type=int, default=0, help="Seconds; 0 = one round")
-    args = parser.parse_args()
+    args = parser.parse_args(argv)
     if args.interval < 0:
         parser.error("interval must be non-negative")
     while True:
@@ -139,6 +139,7 @@ def main():
         if not args.interval:
             break
         time.sleep(args.interval)
+    return 0
 
 
 if __name__ == "__main__":

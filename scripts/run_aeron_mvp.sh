@@ -238,6 +238,8 @@ compute_pid=
 audit_pid=
 bridge_pid=
 run_status=RUNNING
+source "$PROJECT_ROOT/utils/version_metadata.sh"
+run_version_metadata=$(ydtrader_version_metadata "$PROJECT_ROOT")
 
 mkdir -p "$archive_dir" "$control_dir"
 
@@ -246,6 +248,7 @@ write_run_metadata() {
     printf 'run_id=%s\nsource=%s\nlatency_mode=%s\nexpected_count=%s\nsync_level=%s\nstarted_at_utc=%s\nstatus=%s\nrecording_id=%s\n' \
         "$run_id" "$source_name" "$latency_mode" "$count" "$sync_level" "$run_started_at_utc" "$run_status" \
         "${recording_id:-}" >"$metadata_tmp"
+    printf '%s\n' "$run_version_metadata" >>"$metadata_tmp"
     mv "$metadata_tmp" "$run_dir/run.meta"
 }
 

@@ -302,3 +302,9 @@ Redis 参数仍为 `REDIS_HOST`、`REDIS_PORT`、`REDIS_DB`，默认 `127.0.0.1:
 完整控制与计数路径；重复 local_id 会覆盖映射；重新启动后的回报关联只搜索内存映射；
 必填字段转换异常可能只写日志而没有错误回报；Redis 故障没有回报重放机制。
 这些是待单独确认的问题，不视为本次修复完成。离线测试通过不等于柜台联调通过。
+# 独立日报与版本留档
+
+源码入口：`python timer_pdf/code/main.py --date yesterday`；统一入口：`python main.py daily-report --date yesterday`。
+配置规则、交易日历、PDF/CSV输出、Docker和每天北京时间09:00的systemd部署见 [timer_pdf/README.md](timer_pdf/README.md)。
+日报不连接柜台或Redis，不依赖Dashboard运行。产物在 `timer_pdf/pdf/<日期>__<行情版本>/`，不提交Git。
+Pipeline新批次保存启动时的tag/commit/dirty；历史版本缺失不拿最新tag回填。查看代码身份：`python main.py version-info`。
