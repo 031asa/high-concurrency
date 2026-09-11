@@ -43,6 +43,10 @@ def main(argv=None):
         text = "\n".join("git_" + k + "=" + (json.dumps(v[k], ensure_ascii=False) if k == "dirty" else str(v[k] or "unknown"))
                          for k in ("tag", "commit", "dirty"))
     if a.write:
+        from timer_pdf.code.publication import require_published
+        require_published(ROOT, v)
+        if a.format == "json":
+            text = json.dumps(v, ensure_ascii=False)
         a.write.parent.mkdir(parents=True, exist_ok=True)
         tmp = a.write.with_suffix(a.write.suffix + ".tmp")
         tmp.write_text(text + "\n")

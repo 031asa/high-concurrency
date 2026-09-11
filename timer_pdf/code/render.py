@@ -54,7 +54,7 @@ def pdf_report(path, report, rules, font, generator):
     def fmt(v):return f"{v:,.3f}" if isinstance(v,(int,float)) else "不可得"
     p(report["date"]+" 行情接入报告","title")
     p("北京时间接收自然日｜"+report["status"]+"｜生成："+report["generated"],"small")
-    p("行情运行版本："+report["version_label"]+"；生成器："+str(generator.get("tag") or generator.get("commit") or "unknown")+
+    p("行情运行提交："+report["version_label"]+"；报告生成器提交："+str(generator.get("commit") or "unknown")+
       "；生成器本地修改："+str(generator.get("dirty")),"small")
     p("规则版本："+rules.version+"。历史运行版本只取run.meta，缺失不回填。","small")
     if report["status"]!="COMPLETE":
@@ -121,8 +121,9 @@ def pdf_report(path, report, rules, font, generator):
         p(f"采样{g['count']}；有效{g['valid']}；失败{g['failed']}；超限{g['exceeded']}；平均{fmt(g['mean'])} ms；最大绝对偏移{fmt(g['max_abs'])} ms。")
         p(str(g["first"])+" 至 "+str(g["last"]),"small")
     if not report["clock"]["groups"]:p("无时钟数据，偏移不可得。")
-    versions=Counter((r["version"]["tag"],r["version"]["commit"],str(r["version"]["dirty"])) for r in report["runs"])
-    table([["运行tag / commit / dirty","批次数"],*[[str(k),str(n)] for k,n in versions.items()]],[440,65])
+    versions=Counter((r["version"]["commit"],str(r["version"]["dirty"])) for r in report["runs"])
+    table([["行情运行 commit / 本地修改","批次数"],*[[str(k),str(n)] for k,n in versions.items()]],[440,65])
+    p("本地修改=True/true的批次不能仅凭该哈希还原；历史缺失仍为unknown，不拿新提交回填。","small")
     p("未知版本的逐批定位见CSV；同一天多个版本不能只用最新tag代表。所有已读取批次的状态不证明当前进程存活。","small")
     p("整批次累计平均值（不同于当日值）","h")
     cumulative=defaultdict_cumulative(report["runs"])
@@ -131,7 +132,7 @@ def pdf_report(path, report, rules, font, generator):
     p("ZMQ：发送成功不等于消费成功。当前分析没有消费ACK对账，实际分发丢包率不可得；未配置endpoint的批次见CSV。","small")
     def footer(c,d):
         c.setStrokeColor(teal);c.line(45,806,550,806);c.setFont("ReportCN",8)
-        c.drawString(45,24,report["date"]+" / "+report["version_label"]);c.drawRightString(550,24,str(d.page))
+        c.drawString(45,24,report["date"]+" / "+str(generator.get("commit","unknown"))[:12]);c.drawRightString(550,24,str(d.page))
     SimpleDocTemplate(str(path),pagesize=(595.28,841.89),leftMargin=45,rightMargin=45,topMargin=50,bottomMargin=44).build(story,onFirstPage=footer,onLaterPages=footer)
     from pypdf import PdfReader
     check=PdfReader(path)

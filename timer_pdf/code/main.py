@@ -16,6 +16,7 @@ if str(ROOT) not in sys.path:sys.path.insert(0,str(ROOT))
 from timer_pdf.code.rules import Rules, TZ
 from timer_pdf.code.analysis import analyze
 from ydcore.version_info import current
+from timer_pdf.code.publication import require_published
 
 @contextmanager
 def lock(root):
@@ -46,7 +47,8 @@ def completed(output,day):
 
 def publish(output,day,report,rules,font,generator):
     from timer_pdf.code.render import pdf_report,csv_report
-    label=report["version_label"];name=day+"__"+label
+    # File identity belongs to the report generator; run identities stay in the PDF.
+    label=generator["commit"];name=day+"__"+label
     destination=output/name
     # Incomplete attempts never replace a previously valid report.
     if report["status"]=="INCOMPLETE":
@@ -94,6 +96,7 @@ def main(argv=None):
     rules=Rules(a.rules)
     from timer_pdf.code.render import choose_font
     font=choose_font(ROOT,a.font);generator=current()
+    require_published(ROOT,generator)
     start=a.catch_up_from or target
     ok=True
     with lock(output):

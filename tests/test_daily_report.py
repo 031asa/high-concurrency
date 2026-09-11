@@ -53,9 +53,9 @@ def test_identity(tmp_path):
     assert current(tmp_path)["commit"] is None
     (tmp_path/"build-version.json").write_text(json.dumps(dict(tag="v0.8.0",commit="abc",dirty=False)))
     assert current(tmp_path)["tag"]=="v0.8.0"
-    assert version_label([dict(tag="unknown",commit="unknown",dirty="unknown")])=="tag-unknown"
-    assert version_label([dict(tag="v1",commit="a",dirty="true")])=="v1-dirty"
-    assert version_label([dict(tag="v1",commit="a",dirty=False),dict(tag="v2",commit="b",dirty=False)])=="tag-multi"
+    assert version_label([dict(tag="unknown",commit="unknown",dirty="unknown")])=="unknown"
+    assert version_label([dict(tag="v1",commit="a"*40,dirty="true")])=="a"*40
+    assert version_label([dict(tag="v1",commit="a"*40,dirty=False),dict(tag="v2",commit="b"*40,dirty=False)])=="a"*40+" / "+"b"*40
 
 def test_archive_reuse(tmp_path,rules):
     spec=importlib.util.spec_from_file_location("archive_fixture",ROOT/"tests/test_archive_analysis.py")
@@ -70,7 +70,7 @@ def test_archive_reuse(tmp_path,rules):
     assert s["clean"]["mean"]==20 and s["categories"]["session_snapshot"]==1
     assert data["duplicates"]==1
     assert data["sources"]["tts"]["clean"]["n"]==0
-    assert data["version_label"]=="tag-unknown"
+    assert data["version_label"]=="unknown"
 
 def test_lock(tmp_path):
     with report_main.lock(tmp_path):
@@ -82,15 +82,17 @@ def test_atomic_and_failed_output(tmp_path,rules,monkeypatch):
     monkeypatch.setattr(render,"pdf_report",lambda path,*args:path.write_bytes(b"pdf"))
     monkeypatch.setattr(render,"csv_report",lambda path,*args:path.write_text("csv"))
     data=dict(version_label="tag-unknown",status="COMPLETE",pending=[],generated="now",sources={})
-    assert report_main.publish(tmp_path,"2026-09-09",data,rules,"unused",{})
+    generator=dict(commit="a"*40)
+    assert report_main.publish(tmp_path,"2026-09-09",data,rules,"unused",generator)
     assert report_main.completed(tmp_path,"2026-09-09")
-    before=(tmp_path/"2026-09-09__tag-unknown").stat().st_ino
+    destination=tmp_path/("2026-09-09__"+"a"*40)
+    before=destination.stat().st_ino
     data["status"]="INCOMPLETE"
-    assert not report_main.publish(tmp_path,"2026-09-09",data,rules,"unused",{})
-    assert (tmp_path/"2026-09-09__tag-unknown").stat().st_ino==before
+    assert not report_main.publish(tmp_path,"2026-09-09",data,rules,"unused",generator)
+    assert destination.stat().st_ino==before
     def broken(*args):raise RuntimeError("render failed")
     monkeypatch.setattr(render,"pdf_report",broken)
-    with pytest.raises(RuntimeError):report_main.publish(tmp_path,"2026-09-09",data,rules,"unused",{})
+    with pytest.raises(RuntimeError):report_main.publish(tmp_path,"2026-09-09",data,rules,"unused",generator)
     assert report_main.completed(tmp_path,"2026-09-09")
 
 def test_timer_and_lazy_help():

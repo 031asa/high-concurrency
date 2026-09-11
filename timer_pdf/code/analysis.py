@@ -34,17 +34,10 @@ def identity(meta):
     return dict(tag=meta.get("git_tag","unknown"),commit=meta.get("git_commit","unknown"),dirty=meta.get("git_dirty","unknown"))
 
 def version_label(versions):
-    labels=set()
-    for v in versions:
-        tag,commit=v["tag"],v["commit"]
-        if tag not in ("unknown","",None):
-            label=tag
-        elif commit not in ("unknown","",None):
-            label="commit-"+commit[:12]
-        else: label="tag-unknown"
-        if v["dirty"] in ("true",True): label+="-dirty"
-        labels.add(re.sub(r"[^A-Za-z0-9._-]","_",label))
-    return next(iter(labels)) if len(labels)==1 else "tag-multi" if labels else "tag-unknown"
+    # Deployment evidence, never the nearest release tag or the generator's HEAD.
+    labels={v.get("commit") if re.fullmatch(r"[0-9a-f]{40,64}",str(v.get("commit","")))
+            else "unknown" for v in versions}
+    return " / ".join(sorted(labels)) if labels else "unknown"
 
 def pending(kind,reason,**data):
     return dict(kind=kind,label=LABELS.get(kind,kind),reason=reason,**data)
