@@ -507,7 +507,8 @@ while kill -0 "$mux_pid" 2>/dev/null; do
         if ! kill -0 "${bridge_pids[$index]}" 2>/dev/null; then
             wait "${bridge_pids[$index]}" || true
             if [[ "${source_kinds[$index]}" != synthetic ]]; then
-                printf 'source bridge exited early: %s\n' "${source_names[$index]}" >&2
+                printf 'source bridge exited early: %s; see %s/%s-bridge.log\n' \
+                    "${source_names[$index]}" "$run_dir" "${source_names[$index]}" >&2
                 exit 1
             fi
         fi

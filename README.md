@@ -305,9 +305,39 @@ Redis 参数仍为 `REDIS_HOST`、`REDIS_PORT`、`REDIS_DB`，默认 `127.0.0.1:
 完整控制与计数路径；重复 local_id 会覆盖映射；重新启动后的回报关联只搜索内存映射；
 必填字段转换异常可能只写日志而没有错误回报；Redis 故障没有回报重放机制。
 这些是待单独确认的问题，不视为本次修复完成。离线测试通过不等于柜台联调通过。
+## 易达行情启动排查
+
+行情桥启动时依次记录 `CREATING_API`、`STARTING_API`、`LOGIN`、`CAUGHTUP`、
+`CHECKING_INSTRUMENT`、`SUBSCRIBED` 和 `FORWARDING`。以 `FORWARDING` 及实际行情
+计数确认收到行情；`LOGIN result=SUCCESS` 仅表示登录成功，不代表合约初始化或订阅完成。
+
+等待阶段每 5 秒输出进度：`WAITING_LOGIN` 表示尚未登录，
+`WAITING_INITIAL_DATA` 表示登录成功但 SDK 尚未完成初始化。启动超时包含当前阶段；
+可用 Ctrl+C/终止信号立即退出等待。多源启动失败会显示对应的
+`result/aeron-mvp/<批次>/<来源>-bridge.log` 路径。
+
+如果持续停在 `WAITING_INITIAL_DATA`，先检查该批次日志和 SDK 初始化，再核对易达
+服务器的实际网络路径。TCP 端口可达、登录成功都不能证明后续数据可用；代理/TUN
+路径可能只通过初始登录。需要时仅对配置中的易达目标 IP/端口做有界直连对照，比较
+`CAUGHTUP`、合约可用性和真实回调；不要关闭全部代理、改动 CTP 路由或跳过初始化
+强行订阅。本项目不自动修改主机路由，长期直连应由部署环境单独配置和验证。
+
 # 独立日报与版本留档
 
 源码入口：`python timer_pdf/code/main.py --date yesterday`；统一入口：`python main.py daily-report --date yesterday`。
 配置规则、交易日历、PDF/CSV输出、Docker和每天北京时间09:00的systemd部署见 [timer_pdf/README.md](timer_pdf/README.md)。
 日报不连接柜台或Redis，不依赖Dashboard运行。产物在 `timer_pdf/pdf/<日期>__<行情版本>/`，不提交Git。
 Pipeline新批次保存启动时的tag/commit/dirty；历史版本缺失不拿最新tag回填。查看代码身份：`python main.py version-info`。
+# UDP 短暂乱序处理
+
+Bridge → Mux 与 Mux → Publisher 使用 UDP。两处接收端默认允许最多
+100 ms、1024 个提前到达包的有界重排；顺序正常时立即处理，不额外等待。
+Mux 按来源独立维护，Publisher 按本次批次维护，保留原始行情与接收时间。
+这不是环形覆盖缓冲区：不会覆盖旧包或跳过缺失序号。
+
+组件命令支持 `--reorder-wait-ms`（1–60000）与
+`--reorder-max-packets`（1–65536）；主启动流程自动采用默认值。
+恢复记录为 `REORDER_RECOVERED`，并独立记录重排数量。
+真正缺包超时、容量耗尽、重复或旧序号仍明确失败，不冒充成功。
+单独重启上游导致序号重置不属于乱序恢复；需要批次一致的启动过程。
+此机制不保证 UDP 不丢包，也不替代拥塞控制或重传。

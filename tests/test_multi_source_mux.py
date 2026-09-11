@@ -14,23 +14,23 @@ from aeron_mvp import multi_source_mux as mux
 
 @pytest.mark.parametrize("second_sequence,expected_sent", [(2, 2), (3, 1)])
 def test_mux_independent_counts(monkeypatch, tmp_path, capsys, second_sequence, expected_sent):
-    packets = iter([packet(3, 1, 1), packet(3, second_sequence, 1)])
+    packets = [packet(3, 1, 1), packet(3, second_sequence, 1)]
     channel = SimpleNamespace(
         setblocking=lambda value: None, bind=lambda address: None,
-        close=lambda: None, recvfrom=lambda size: (next(packets), None),
+        close=lambda: None, recvfrom=lambda size: (packets.pop(0), None),
         sendto=lambda payload, address: len(payload),
     )
     registered = []
     selector = SimpleNamespace(
         register=lambda sock, event, state: registered.append(state),
-        select=lambda timeout: [(SimpleNamespace(data=registered[0]), None)],
+        select=lambda timeout: [(SimpleNamespace(data=registered[0]), None)] if packets else [],
         close=lambda: None,
     )
     monkeypatch.setattr(mux.socket, "socket", lambda *args: channel)
     monkeypatch.setattr(mux.selectors, "DefaultSelector", lambda: selector)
     args = SimpleNamespace(input=["ctp-live=24001"], output_host="127.0.0.1",
         output_port=24002, bind_host="127.0.0.1", count_per_source=2,
-        source_timeout_seconds=60, ready_file=tmp_path / "ready")
+        source_timeout_seconds=60, ready_file=tmp_path / "ready", reorder_wait_ms=1)
     if second_sequence == 3:
         with pytest.raises(RuntimeError, match="sequence discontinuity"):
             mux.run(args)

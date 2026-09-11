@@ -227,6 +227,38 @@ def create_api(listener: YdApiListener, account: str, password: str, api_config:
     return YDApi(listener, account, password, api_config)
 
 
+def wait_for_initialization(listener: YdApiListener, stop: threading.Event, timeout: float) -> bool:
+    """Do not confuse a successful login with completed instrument initialization."""
+    started = time.monotonic()
+    deadline = started + timeout
+    next_progress = started
+    while True:
+        if stop.is_set():
+            print("YDAPI_BRIDGE state=STOPPED phase=INITIALIZATION", flush=True)
+            return False
+        if listener.login_error not in (None, 0):
+            raise RuntimeError(f"YDApi login failed: {listener.login_error}")
+        if listener.caughtup_event.is_set():
+            return True
+        now = time.monotonic()
+        phase = "WAITING_LOGIN" if listener.login_error is None else "WAITING_INITIAL_DATA"
+        if now >= next_progress:
+            print(
+                f"YDAPI_BRIDGE state={phase} elapsed_seconds={now - started:.1f} "
+                f"timeout_seconds={timeout:g} ignored_callbacks={listener.ignored_callbacks}",
+                flush=True,
+            )
+            next_progress = now + 5
+        if now >= deadline:
+            raise TimeoutError(
+                f"YDApi {phase} timed out after {timeout:g}s; "
+                f"login_error={listener.login_error} caughtup=False; "
+                "subscription has not started. Check SDK/server initialization and network route; "
+                "this is not an Aeron or Dashboard timeout"
+            )
+        stop.wait(min(0.1, deadline - now))
+
+
 def parse_args(argv=None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--instrument", required=True)
@@ -252,6 +284,7 @@ def main(argv=None) -> int:
     account, password = load_account(args.account_config)
     publisher = YdApiUdpPublisher(args.udp_host, args.udp_port, args.repeat)
     listener = YdApiListener(publisher)
+    print("YDAPI_BRIDGE state=CREATING_API", flush=True)
     api = create_api(listener, account, password, args.api_config)
     stop = threading.Event()
     subscribed = False
@@ -262,15 +295,13 @@ def main(argv=None) -> int:
     signal.signal(signal.SIGINT, stop_handler)
     signal.signal(signal.SIGTERM, stop_handler)
     try:
+        print("YDAPI_BRIDGE state=STARTING_API", flush=True)
         result = api.start()
         if result is False:
             raise RuntimeError("YDApi.start() returned False")
-        deadline = time.monotonic() + args.startup_timeout_seconds
-        while not listener.caughtup_event.wait(0.1):
-            if listener.login_error not in (None, 0):
-                raise RuntimeError(f"YDApi login failed: {listener.login_error}")
-            if time.monotonic() >= deadline:
-                raise TimeoutError("waiting for YDApi caughtup timed out")
+        if not wait_for_initialization(listener, stop, args.startup_timeout_seconds):
+            return 130
+        print(f"YDAPI_BRIDGE state=CHECKING_INSTRUMENT instrument={args.instrument}", flush=True)
         if api.get_instrument(args.instrument) is None:
             raise ValueError(f"instrument not found in YDApi: {args.instrument}")
         # Enable immediately before subscribe so a synchronous subscription callback
