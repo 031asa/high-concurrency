@@ -5,6 +5,7 @@ No broker connection, Java process, or third-party Python package is required.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import math
 import mmap
@@ -31,16 +32,19 @@ def iso(ns):
     return datetime.fromtimestamp(ns / NS, CHINA).isoformat() if day_of(ns) else None
 
 
-def quotes(path):
+def quotes(path, *, snapshot_size=None, include_digest=False):
     """Frame lengths exclude alignment padding. Zero length marks unused tail.
 
-    Only this project's complete, unfragmented schema 701/template 1/v3 is
+    Only this project's complete, unfragmented schema 701/template 1/v2-v3 is
     supported. Unsupported or truncated frames fail loudly instead of returning
     misleading statistics. Analyse stopped runs; never truncate an open archive.
+    Replay may bound its read to snapshot_size and request per-frame digests;
+    the default analysis output remains unchanged.
     """
-    if not path.stat().st_size:
+    size = path.stat().st_size if snapshot_size is None else snapshot_size
+    if not size:
         return
-    with path.open("rb") as stream, mmap.mmap(stream.fileno(), 0, access=mmap.ACCESS_READ) as data:
+    with path.open("rb") as stream, mmap.mmap(stream.fileno(), size, access=mmap.ACCESS_READ) as data:
         offset = 0
         while offset + 32 <= len(data):
             length, version, flags, kind = struct.unpack_from("<iBBH", data, offset)
@@ -54,14 +58,14 @@ def quotes(path):
             if kind != 1 or flags != 192 or length < 40:
                 raise ValueError(f"{path}:{offset}: unsupported or fragmented frame")
             block, template, schema, sbe_version = struct.unpack_from("<HHHH", data, offset + 32)
-            if (schema, template, sbe_version, block) != (701, 1, 3, 324):
+            if (schema, template, sbe_version, block) not in ((701, 1, 3, 324), (701, 1, 2, 194)):
                 raise ValueError(f"{path}:{offset}: unsupported SBE {schema}/{template}/{sbe_version}/{block}")
             base, end = offset + 40, offset + length
             cursor = base + block
             if cursor > end:
                 raise ValueError(f"{path}:{offset}: truncated SBE block")
             fields = []
-            for _ in range(8):
+            for _ in range(8 if sbe_version == 3 else 4):
                 if cursor + 2 > end:
                     raise ValueError(f"{path}:{offset}: truncated string length")
                 size = struct.unpack_from("<H", data, cursor)[0]
@@ -70,12 +74,17 @@ def quotes(path):
                     raise ValueError(f"{path}:{offset}: invalid string length")
                 fields.append(data[cursor:cursor + size].decode("utf-8"))
                 cursor += size
+            if include_digest and cursor != end:
+                raise ValueError(f"{path}:{offset}: unexpected trailing SBE bytes")
             sequence, market, received, price = struct.unpack_from("<QQQd", data, base)
+            digest = {"digest": hashlib.sha256(data[offset + 32:end]).hexdigest()} if include_digest else {}
             yield dict(session=fields[0], sequence=sequence, market=market, received=received,
                        price=price if math.isfinite(price) else None,
                        valid=data[base + 64] == 1, contract=fields[1],
-                       source=fields[7], market_raw=fields[3])
+                       source=fields[7] if sbe_version == 3 else "", market_raw=fields[3], frame_offset=offset, **digest)
             offset += (length + 31) & ~31
+        if include_digest and offset < len(data) and len(data) - offset < 32 and any(data[offset:]):
+            raise ValueError(f"{path}:{offset}: incomplete tail header")
 
 
 def stats(db, where, args):
@@ -122,7 +131,7 @@ def analyse(run_dir, selected_date=None):
                       "分位数为原始样本精确nearest-rank，标准差为总体标准差；非HdrHistogram近似。",
                       "累计延迟为本批次该实盘来源所有时间有效样本，含跨日快照；与Dashboard首笔过滤口径可能不同。",
                       "按session+sequence去重，不把不同序号的相同价格行情当重复。",
-                      "仅支持本项目从段首开始的未分片SBE v3归档；零帧视为未使用尾部，建议分析停止的批次。",
+                      "仅支持本项目从段首开始的未分片SBE v2/v3归档；零帧视为未使用尾部，建议分析停止的批次。",
                   ])
     # Disk-backed scratch storage keeps raw quote count out of Python RAM.
     with tempfile.TemporaryDirectory(prefix="aeron-analysis-") as scratch:
