@@ -6,6 +6,8 @@ PROJECT_ROOT=$(cd -- "$SCRIPT_DIR/.." && pwd)
 MVP_DIR="$PROJECT_ROOT/aeron_mvp"
 RUN_JAVA=(bash "$MVP_DIR/run_java.sh")
 source "$PROJECT_ROOT/utils/conda_runtime.sh"
+source "$PROJECT_ROOT/utils/version_metadata.sh"
+run_version_metadata=$(ydtrader_version_metadata "$PROJECT_ROOT")
 
 sources=synthetic:sim-a,synthetic:sim-b
 declare -a source_config_files=()
@@ -342,6 +344,7 @@ write_run_metadata() {
                 printf 'source_config.%s=%s\n' "${source_names[$index]}" "${source_config_paths[$index]}"
             fi
         done
+        printf '%s\n' "$run_version_metadata"
     } >"$temporary"
     mv "$temporary" "$run_dir/run.meta"
 }

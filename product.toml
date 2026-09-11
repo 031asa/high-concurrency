@@ -18,6 +18,8 @@ nuitka_include_modules = [
   "ydcore.trading",
   "ydcore.yd_redis_server",
   "ydcore.archive_analysis",
+  "ydcore.version_info",
+  "scripts.time_probe",
   "aeron_mvp.ctp_bridge",
   "aeron_mvp.ctp_cli",
   "aeron_mvp.market_wire",
@@ -29,7 +31,7 @@ nuitka_include_modules = [
   "dashboard.server",
   "dashboard.replay",
 ]
-nuitka_include_packages = ["redis"]
+nuitka_include_packages = ["redis", "timer_pdf", "reportlab", "pypdf"]
 
 [protection.packages]
 aeron_mvp = [
@@ -47,13 +49,14 @@ dashboard = ["server", "replay"]
 [container]
 base_image = "ubuntu:24.04"
 builder_image = "secure-release-builder-cn:24.7.1"
-runtime_packages = ["ca-certificates"]
+runtime_packages = ["ca-certificates", "fonts-wqy-microhei"]
 uid = 10001
 
 [build]
 environment_file = "environment.yml"
 prepare_commands = [["bash", "scripts/prepare_secure_release.sh"]]
 exclude_paths = [
+  "timer_pdf/pdf",
   "scripts/analyze_archive.py",
   "scripts/yd_redis_server.py",
   "build_tools",

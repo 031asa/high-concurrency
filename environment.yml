@@ -13,6 +13,9 @@ dependencies:
   - wheel=0.45.1
   - curl
   - unzip
+  - reportlab=4.4.3
+  - pypdf=6.0.0
+  - poppler
   - pip:
       - Cython==3.0.12
       - Nuitka==2.7.12

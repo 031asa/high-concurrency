@@ -77,6 +77,9 @@ def test_runtime_shell_scripts_only_call_shared_python_entry():
         source = (ROOT / "scripts" / name).read_text()
         assert '"$PROJECT_ROOT/main.py"' in source
         for module in launcher.APPLICATION_MODULES.values():
+            if module == "timer_pdf.code.main":
+                assert '"$PROJECT_ROOT/timer_pdf/code/main.py"' not in source
+                continue
             assert module.rsplit(".", 1)[-1] + '.py"' not in source
         subprocess.run(["bash", "-n", str(ROOT / "scripts" / name)], check=True)
 
@@ -224,6 +227,7 @@ def test_compiled_modules_work_without_their_python_sources(tmp_path):
             continue  # These source-only wrappers are excluded from releases.
         shutil.copy2(support, app / "scripts" / support.name)
     shutil.copy2(ENTRY, app / ENTRY.name)
+    shutil.copytree(ROOT / "timer_pdf", app / "timer_pdf", ignore=shutil.ignore_patterns("pdf", "__pycache__"))
     entry = app / ENTRY.name
     config = tmp_path / "source config.json"
     config.write_text(json.dumps({"schema_version": 1, "name": "sim-a", "kind": "synthetic", "instrument": "IC2609"}))

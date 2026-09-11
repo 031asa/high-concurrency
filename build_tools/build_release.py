@@ -63,6 +63,8 @@ def main(argv=None):
         raise SystemExit("release target must be Linux x86_64")
     shutil.rmtree(BUILD_ROOT / "nuitka", ignore_errors=True)
     shutil.rmtree(RESULT_ROOT / RELEASE_NAME, ignore_errors=True)
+    run(sys.executable, "main.py", "version-info", "--write", "build-version.json")
+    run(sys.executable, "main.py", "version-info", "--format", "meta", "--write", "build-version.meta")
     run(sys.executable, "build_tools/build_cython.py", "--clean")
     run(
         sys.executable,
@@ -79,6 +81,11 @@ def main(argv=None):
         "--include-module=ydcore.yd_redis_server",
         "--include-module=ydcore.archive_analysis",
         "--include-package=redis",
+        "--include-package=timer_pdf",
+        "--include-package=reportlab",
+        "--include-package=pypdf",
+        "--include-module=ydcore.version_info",
+        "--include-module=scripts.time_probe",
         "--include-module=dashboard.server",
         "--include-module=dashboard.replay",
         "--include-module=ydcore.monitoring",
@@ -94,6 +101,10 @@ def main(argv=None):
     release = RESULT_ROOT / RELEASE_NAME
     app = release / "app"
     shutil.copytree(dist, app)
+    for name in ("build-version.json", "build-version.meta"):
+        shutil.copy2(PROJECT_ROOT / name, app / name)
+    (app / "timer_pdf/code").mkdir(parents=True, exist_ok=True)
+    shutil.copy2(PROJECT_ROOT / "timer_pdf/code/rules.json", app / "timer_pdf/code/rules.json")
     (app / "config").mkdir()
     shutil.copy2(PROJECT_ROOT / "config" / "account.example.json", app / "config")
     shutil.copy2(PROJECT_ROOT / "config" / "monitor.json", app / "config")

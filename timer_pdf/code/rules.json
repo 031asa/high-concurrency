@@ -1,0 +1,145 @@
+{
+  "version": "cn-futures-2026-r1",
+  "timezone": "Asia/Shanghai",
+  "calendar_start": "2026-01-01",
+  "calendar_end": "2026-12-31",
+  "holiday_ranges": [
+    [
+      "2026-01-01",
+      "2026-01-03"
+    ],
+    [
+      "2026-02-15",
+      "2026-02-23"
+    ],
+    [
+      "2026-04-04",
+      "2026-04-06"
+    ],
+    [
+      "2026-05-01",
+      "2026-05-05"
+    ],
+    [
+      "2026-06-19",
+      "2026-06-21"
+    ],
+    [
+      "2026-09-25",
+      "2026-09-27"
+    ],
+    [
+      "2026-10-01",
+      "2026-10-07"
+    ]
+  ],
+  "no_night": [
+    "2025-12-31",
+    "2026-02-13",
+    "2026-04-03",
+    "2026-04-30",
+    "2026-06-18",
+    "2026-09-24",
+    "2026-09-30",
+    "2026-12-31"
+  ],
+  "overrides": {},
+  "close_second_tolerance": 1,
+  "gap_seconds": 60,
+  "reference_seconds": 180,
+  "products": {
+    "IF": "index",
+    "IH": "index",
+    "IC": "index",
+    "IM": "index",
+    "au": "precious",
+    "ag": "precious",
+    "sc": "precious",
+    "cu": "metal",
+    "rb": "early",
+    "i": "early",
+    "m": "early"
+  },
+  "sessions": {
+    "index": {
+      "day": [
+        [
+          "09:30",
+          "11:30"
+        ],
+        [
+          "13:00",
+          "15:00"
+        ]
+      ],
+      "night": null
+    },
+    "precious": {
+      "day": [
+        [
+          "09:00",
+          "10:15"
+        ],
+        [
+          "10:30",
+          "11:30"
+        ],
+        [
+          "13:30",
+          "15:00"
+        ]
+      ],
+      "night": [
+        "21:00",
+        "02:30"
+      ]
+    },
+    "metal": {
+      "day": [
+        [
+          "09:00",
+          "10:15"
+        ],
+        [
+          "10:30",
+          "11:30"
+        ],
+        [
+          "13:30",
+          "15:00"
+        ]
+      ],
+      "night": [
+        "21:00",
+        "01:00"
+      ]
+    },
+    "early": {
+      "day": [
+        [
+          "09:00",
+          "10:15"
+        ],
+        [
+          "10:30",
+          "11:30"
+        ],
+        [
+          "13:30",
+          "15:00"
+        ]
+      ],
+      "night": [
+        "21:00",
+        "23:00"
+      ]
+    }
+  },
+  "sources": [
+    "https://www.shfe.com.cn/services/calenderandholidays/holiday/",
+    "https://www.cffex.com.cn/en_new/Notices/20251217/46426.html",
+    "https://www.cffex.com.cn/hs300/",
+    "https://www.ine.cn/products/futures/energyandchemical/sc_f/manual/202101/W020250324349116728488.pdf"
+  ],
+  "notes": "Calendar strictly limited to 2026; weekends closed, holiday eve nights closed. Overrides map dates to explicit intervals per session group; missing calendar/product never treated as normal."
+}

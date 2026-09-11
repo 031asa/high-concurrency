@@ -16,6 +16,9 @@ BUSINESS_MODULES = {
 
 # Import on demand: top-level help must not load native broker APIs or start services.
 APPLICATION_MODULES = {
+    "daily-report": "timer_pdf.code.main",
+    "version-info": "ydcore.version_info",
+    "time-probe": "scripts.time_probe",
     "analyze-archive": "ydcore.archive_analysis",
     "yd-redis-server": "ydcore.yd_redis_server",
     "redis-trader": "ydcore.yd_redis_server",
@@ -43,6 +46,9 @@ SHELL_HELP = {
 USAGE = """usage: ydtrader <command> [options]
 
 commands:
+  daily-report [options]      independent PDF and pending CSV report
+  version-info [options]      read-only deployed version identity
+  time-probe [options]        read-only clock probe evidence
   analyze-archive [options]    read-only analysis of recorded market data
   yd-redis-server [options]    alias for redis-trader
   redis-trader [options]      independent Redis trading service
