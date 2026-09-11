@@ -1,4 +1,6 @@
 import socket
+import threading
+import time
 import unittest
 from datetime import datetime
 from unittest.mock import Mock
@@ -94,6 +96,42 @@ class YdApiAeronBridgeTests(unittest.TestCase):
 
         publisher.publish.assert_called_once()
         self.assertIs(publisher.publish.call_args.args[0], expected)
+
+    def test_login_success_does_not_skip_initialization(self):
+        listener = ydapi_bridge.YdApiListener(Mock())
+        listener.login(0, 0, False)
+        with self.assertRaisesRegex(TimeoutError, "WAITING_INITIAL_DATA"):
+            ydapi_bridge.wait_for_initialization(listener, threading.Event(), .01)
+
+    def test_login_timeout_is_distinct(self):
+        listener = ydapi_bridge.YdApiListener(Mock())
+        with self.assertRaisesRegex(TimeoutError, "WAITING_LOGIN"):
+            ydapi_bridge.wait_for_initialization(listener, threading.Event(), .01)
+
+    def test_stop_interrupts_initialization_wait(self):
+        listener = ydapi_bridge.YdApiListener(Mock())
+        stop = threading.Event()
+        timer = threading.Timer(.01, stop.set)
+        timer.start()
+        started = time.monotonic()
+        try:
+            self.assertFalse(ydapi_bridge.wait_for_initialization(listener, stop, 60))
+            self.assertLess(time.monotonic() - started, 1)
+        finally:
+            timer.join()
+
+    def test_login_failure_is_not_hidden_by_caughtup(self):
+        listener = ydapi_bridge.YdApiListener(Mock())
+        listener.login_error = 12
+        listener.caughtup_event.set()
+        with self.assertRaisesRegex(RuntimeError, "login failed: 12"):
+            ydapi_bridge.wait_for_initialization(listener, threading.Event(), 60)
+
+    def test_initialized_listener_can_subscribe(self):
+        listener = ydapi_bridge.YdApiListener(Mock())
+        listener.login(0, 0, False)
+        listener.caughtup()
+        self.assertTrue(ydapi_bridge.wait_for_initialization(listener, threading.Event(), 60))
 
 
 if __name__ == "__main__":

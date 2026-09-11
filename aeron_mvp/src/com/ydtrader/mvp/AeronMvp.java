@@ -333,7 +333,10 @@ public final class AeronMvp
         final UnsafeBuffer buffer = new UnsafeBuffer(ByteBuffer.allocateDirect(BUFFER_CAPACITY));
         final MessageHeaderEncoder headerEncoder = new MessageHeaderEncoder();
         final MarketQuoteEncoder quoteEncoder = new MarketQuoteEncoder();
-        final ByteBuffer packet = ByteBuffer.allocateDirect(ADAPTER_PACKET_SIZE_TAGGED_V3)
+        final UdpReorderBuffer reorder = new UdpReorderBuffer(adapterName,
+            options.longValue("reorder-wait-ms", 100L, 1L, 60_000L),
+            options.integer("reorder-max-packets", 1024, 1, 65_536));
+        final ByteBuffer incoming = ByteBuffer.allocateDirect(ADAPTER_PACKET_SIZE_TAGGED_V3)
             .order(ByteOrder.BIG_ENDIAN);
         final double[] bidPrices = new double[MAX_DEPTH_LEVELS];
         final double[] askPrices = new double[MAX_DEPTH_LEVELS];
@@ -387,26 +390,37 @@ public final class AeronMvp
                     if (System.nanoTime() >= nextCountersNs)
                     {
                         logAdapterCounters(adapterName, receivedPackets, sourceTicks, published);
+                        reorder.logCounters();
                         nextCountersNs = System.nanoTime() + Duration.ofSeconds(5).toNanos();
                     }
-                    packet.clear();
-                    if (source.receive(packet) == null)
+                    final ByteBuffer packet = reorder.poll(System.nanoTime());
+                    if (packet == null)
                     {
-                        if (System.nanoTime() - lastPacketNs >
-                            Duration.ofSeconds(sourceTimeoutSeconds).toNanos())
+                        incoming.clear();
+                        if (source.receive(incoming) == null)
                         {
-                            throw new IllegalStateException(
-                                adapterName + " input idle for " + sourceTimeoutSeconds +
-                                    " seconds after source_ticks=" + sourceTicks +
-                                    " published=" + published +
-                                    " remaining=" + (count - published));
+                            if (System.nanoTime() - lastPacketNs >
+                                Duration.ofSeconds(sourceTimeoutSeconds).toNanos())
+                            {
+                                throw new IllegalStateException(
+                                    adapterName + " input idle for " + sourceTimeoutSeconds +
+                                        " seconds after source_ticks=" + sourceTicks +
+                                        " published=" + published +
+                                        " remaining=" + (count - published));
+                            }
+                            Thread.onSpinWait();
+                            continue;
                         }
-                        Thread.onSpinWait();
+                        lastPacketNs = System.nanoTime();
+                        receivedPackets++;
+                        incoming.flip();
+                        if (incoming.remaining() < 36 || incoming.getInt(0) != ADAPTER_PACKET_MAGIC)
+                        {
+                            throw new IllegalArgumentException("invalid " + adapterName + " packet header");
+                        }
+                        reorder.offer(incoming.getLong(12), incoming, lastPacketNs);
                         continue;
                     }
-                    lastPacketNs = System.nanoTime();
-                    receivedPackets++;
-                    packet.flip();
                     final int packetSize = packet.remaining();
                     if (packetSize != ADAPTER_PACKET_SIZE_V1 &&
                         packetSize != ADAPTER_PACKET_SIZE_V2 &&
@@ -586,6 +600,7 @@ public final class AeronMvp
         finally
         {
             logAdapterCounters(adapterName, receivedPackets, sourceTicks, published);
+            reorder.logCounters();
         }
 
         System.out.printf(

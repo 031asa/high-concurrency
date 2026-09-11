@@ -10,7 +10,7 @@ import selectors
 import socket
 import struct
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 
@@ -29,6 +29,53 @@ class InputSpec:
 
 
 @dataclass
+class PacketReorderBuffer:
+    source: str = "unknown"
+    wait_ms: int = 100
+    capacity: int = 1024
+    expected: int = 1
+    pending: dict = field(default_factory=dict)
+    reordered_packets: int = 0
+    recovered_gaps: int = 0
+
+    def check_timeout(self, now: float) -> None:
+        if self.pending and now - min(t for _, t in self.pending.values()) >= self.wait_ms / 1000:
+            self.fail(min(self.pending), "reorder_timeout")
+
+    def fail(self, actual: int, reason: str) -> None:
+        raise RuntimeError(
+            f"source sequence discontinuity source={self.source} "
+            f"expected={self.expected} actual={actual} reason={reason} "
+            f"buffered={len(self.pending)} wait_ms={self.wait_ms} capacity={self.capacity}"
+        )
+
+    def offer(self, sequence: int, packet: bytes, now: float) -> list[bytes]:
+        self.check_timeout(now)
+        if sequence < self.expected or sequence in self.pending:
+            self.fail(sequence, "duplicate_or_stale")
+        if sequence > self.expected:
+            if len(self.pending) >= self.capacity:
+                self.fail(sequence, "reorder_capacity")
+            if not self.pending:
+                print(f"MULTI_SOURCE_MUX state=REORDER_WAIT source={self.source} "
+                      f"next_sequence={self.expected} received_sequence={sequence}", flush=True)
+            self.pending[sequence] = (packet, now)
+            self.reordered_packets += 1
+            return []
+        waiting = bool(self.pending)
+        ready = [packet]
+        self.expected += 1
+        while self.expected in self.pending:
+            ready.append(self.pending.pop(self.expected)[0])
+            self.expected += 1
+        if waiting and not self.pending:
+            self.recovered_gaps += 1
+            print(f"MULTI_SOURCE_MUX state=REORDER_RECOVERED source={self.source} "
+                  f"next_sequence={self.expected} recovered_gaps={self.recovered_gaps}", flush=True)
+        return ready
+
+
+@dataclass
 class InputState:
     spec: InputSpec
     socket: socket.socket
@@ -38,6 +85,7 @@ class InputState:
     published: int = 0
     last_packet_at: float = 0.0
     received_packets: int = 0
+    reorder: PacketReorderBuffer = field(default_factory=PacketReorderBuffer)
 
 
 def log_counters(states: list[InputState]) -> None:
@@ -46,7 +94,10 @@ def log_counters(states: list[InputState]) -> None:
         print(
             f"MULTI_SOURCE_MUX state=COUNTERS timestamp_ns={timestamp_ns} "
             f"source={state.spec.source} udp_received_packets={state.received_packets} "
-            f"udp_sent_packets={state.source_ticks} expanded_records={state.published}",
+            f"udp_sent_packets={state.source_ticks} expanded_records={state.published} "
+            f"reorder_buffered={len(state.reorder.pending)} "
+            f"reordered_packets={state.reorder.reordered_packets} "
+            f"recovered_gaps={state.reorder.recovered_gaps}",
             flush=True,
         )
 
@@ -144,6 +195,8 @@ def run(args: argparse.Namespace) -> int:
             source_socket.bind((args.bind_host, spec.port))
             source_socket.setblocking(False)
             state = InputState(spec, source_socket, args.count_per_source)
+            state.reorder = PacketReorderBuffer(spec.source,
+                getattr(args, "reorder_wait_ms", 100), getattr(args, "reorder_max_packets", 1024))
             state.last_packet_at = started
             states.append(state)
             selector.register(source_socket, selectors.EVENT_READ, state)
@@ -160,12 +213,14 @@ def run(args: argparse.Namespace) -> int:
         global_sequence = 0
         next_counters_at = started + 5.0
         while any(state.remaining for state in states):
-            events = selector.select(timeout=0.05)
+            events = selector.select(timeout=min(0.01, getattr(args, "reorder_wait_ms", 100) / 1000))
             now = time.monotonic()
             if now >= next_counters_at:
                 log_counters(states)
                 next_counters_at = now + 5.0
             for state in states:
+                if state.remaining:
+                    state.reorder.check_timeout(now)
                 if state.remaining and now - state.last_packet_at > args.source_timeout_seconds:
                     raise TimeoutError(idle_timeout_message(state, args.source_timeout_seconds))
             for key, _ in events:
@@ -175,32 +230,28 @@ def run(args: argparse.Namespace) -> int:
                 state.last_packet_at = now
                 if not state.remaining:
                     continue
-                tagged, source_sequence, expanded = tag_packet(
+                _, source_sequence, _ = tag_packet(
                     packet,
                     state.spec.source,
                     global_sequence + 1,
                     state.remaining,
                 )
-                if source_sequence != state.expected_sequence:
-                    raise RuntimeError(
-                        f"source sequence discontinuity source={state.spec.source} "
-                        f"expected={state.expected_sequence} actual={source_sequence}"
-                    )
-                try:
-                    sent = output.sendto(tagged, destination)
-                except (BlockingIOError, InterruptedError, OSError) as exc:
-                    raise RuntimeError(
-                        f"UDP output failed for source {state.spec.source}"
-                    ) from exc
-                if sent != len(tagged):
-                    raise RuntimeError(
-                        f"short UDP output for source {state.spec.source}: {sent}/{len(tagged)}"
-                    )
-                global_sequence += 1
-                state.expected_sequence += 1
-                state.source_ticks += 1
-                state.published += expanded
-                state.remaining -= expanded
+                for ordered in state.reorder.offer(source_sequence, packet, now):
+                    if not state.remaining:
+                        break
+                    tagged, _, expanded = tag_packet(ordered, state.spec.source,
+                                                     global_sequence + 1, state.remaining)
+                    try:
+                        sent = output.sendto(tagged, destination)
+                    except (BlockingIOError, InterruptedError, OSError) as exc:
+                        raise RuntimeError(f"UDP output failed for source {state.spec.source}") from exc
+                    if sent != len(tagged):
+                        raise RuntimeError(f"short UDP output for source {state.spec.source}: {sent}/{len(tagged)}")
+                    global_sequence += 1
+                    state.expected_sequence += 1
+                    state.source_ticks += 1
+                    state.published += expanded
+                    state.remaining -= expanded
 
         counts = ",".join(f"{state.spec.source}:{state.published}" for state in states)
         print(
@@ -226,7 +277,11 @@ def parse_args(argv=None) -> argparse.Namespace:
     parser.add_argument("--count-per-source", type=int, required=True)
     parser.add_argument("--source-timeout-seconds", type=float, default=60.0)
     parser.add_argument("--ready-file", type=Path, required=True)
+    parser.add_argument("--reorder-wait-ms", type=int, default=100)
+    parser.add_argument("--reorder-max-packets", type=int, default=1024)
     args = parser.parse_args(argv)
+    if not 1 <= args.reorder_wait_ms <= 60_000 or not 1 <= args.reorder_max_packets <= 65_536:
+        parser.error("reorder wait must be 1..60000 ms and capacity 1..65536 packets")
     if not 1 <= args.output_port <= 65535:
         parser.error("--output-port must be between 1 and 65535")
     if args.count_per_source < 1:
