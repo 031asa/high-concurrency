@@ -182,6 +182,10 @@ def test_http_loading_does_not_block_live(tmp_path, monkeypatch):
     try:
         assert json.load(urlopen(root+"/api/replay/catalog",timeout=2))["status"]=="loading"
         assert json.load(urlopen(root+"/api/status",timeout=2))["dashboard_status"]=="IDLE"
+        script = urlopen(root+"/replay.js", timeout=2)
+        assert script.headers.get_content_type() == "text/javascript"
+        assert b"class ReplayWorkspace" in script.read()
+        assert b"replay-template" in urlopen(root+"/", timeout=2).read()
         with pytest.raises(HTTPError) as error:
             urlopen(root+"/api/replay/catalog?path=/etc/passwd")
         assert error.value.code==400

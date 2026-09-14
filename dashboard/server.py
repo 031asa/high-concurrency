@@ -577,6 +577,10 @@ class DashboardHandler(BaseHTTPRequestHandler):
         if path in {"/", "/index.html"}:
             self._send_bytes(HTTPStatus.OK, "text/html; charset=utf-8", self.index_file.read_bytes())
             return
+        if path == "/replay.js":
+            self._send_bytes(HTTPStatus.OK, "text/javascript; charset=utf-8",
+                             Path(__file__).with_name("replay.js").read_bytes())
+            return
         if path == "/api/status":
             source = parse_qs(request.query).get("source", [None])[0]
             self._send_json(HTTPStatus.OK, collect_status(self.result_root, source=source))
@@ -605,6 +609,16 @@ class DashboardHandler(BaseHTTPRequestHandler):
         print("DASHBOARD_HTTP " + (fmt % args), flush=True)
 
     def do_POST(self):
+        if self.path == "/api/replay/snapshots":
+            try:
+                length = int(self.headers.get("Content-Length", "0"))
+                if not 0 < length <= 1048576:
+                    raise ValueError("批量请求体无效或超过1MiB")
+                params = json.loads(self.rfile.read(length))
+                self._send_json(HTTPStatus.OK, self.replay_store.snapshots(params))
+            except (ValueError, OSError, sqlite3.Error, struct.error) as error:
+                self._send_json(HTTPStatus.BAD_REQUEST, {"error": str(error)})
+            return
         if self.path == "/api/replay/refresh":
             self.replay_store.refresh()
             self._send_json(HTTPStatus.ACCEPTED, {"status": "loading"})

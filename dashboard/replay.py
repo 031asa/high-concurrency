@@ -8,6 +8,7 @@ import os
 import sqlite3
 import struct
 import threading
+from contextlib import nullcontext
 from datetime import date, datetime, timezone
 from pathlib import Path
 
@@ -139,7 +140,11 @@ class ReplayStore:
         state = dict(self.state)
         if state["status"] != "ready":
             return state
-        with sqlite3.connect(f"file:{self.path}?mode=ro", uri=True) as db:
+        return self._query(kind, params)
+
+    def _query(self, kind, params, connection=None):
+        with (nullcontext(connection) if connection is not None else
+              sqlite3.connect(f"file:{self.path}?mode=ro", uri=True)) as db:
             db.row_factory = sqlite3.Row
             # Database and metadata are read from the same published snapshot.
             state = json.loads(db.execute("SELECT value FROM metadata").fetchone()[0])
@@ -159,6 +164,10 @@ class ReplayStore:
                       "source": source, "contracts": contracts, "contract": contract,
                       "count": count, "start": str(start or 0), "end": str(end or 0)}
             if kind == "catalog":
+                result["contract_bounds"] = {
+                    r[0]: {"count": r[1], "start": str(r[2]), "end": str(r[3])}
+                    for r in db.execute("SELECT contract,n,start,end FROM catalog WHERE day=? AND source=? ORDER BY contract", (day, source))
+                }
                 result["details"] = [dict(id=r[0], metadata=json.loads(r[1])) for r in db.execute(
                     f"SELECT id,meta FROM batches WHERE id IN (SELECT DISTINCT batch FROM ticks WHERE {where})", args)]
                 return result
@@ -232,3 +241,49 @@ class ReplayStore:
                           next=str(nxt[0]) if nxt else None,
                           next_position=f"{nxt[0]}:{nxt[1]}" if nxt else None)
             return result
+
+    def snapshots(self, params):
+        """One database generation and one target instant for the complete selection."""
+        if not isinstance(params, dict) or set(params) - {"date", "source", "contracts", "time"}:
+            raise ValueError("不支持的批量回放参数")
+        day, source, contracts = params.get("date"), params.get("source"), params.get("contracts")
+        if not isinstance(day, str) or not isinstance(source, str) or not source:
+            raise ValueError("需要日期和行情源")
+        date.fromisoformat(day)
+        if not isinstance(contracts, list) or any(not isinstance(c, str) or not c for c in contracts):
+            raise ValueError("contracts 必须为合约名称列表")
+        stamp = params.get("time")
+        if not isinstance(stamp, str) or not stamp.isascii() or not stamp.isdigit():
+            raise ValueError("回放时间必须为纳秒整数字符串")
+        target = int(stamp)
+        if not 0 <= target <= 9223372036854775807:
+            raise ValueError("无效回放时间")
+        if self.state["status"] == "idle":
+            self.refresh()
+        if self.state["status"] != "ready":
+            return dict(self.state)
+        with sqlite3.connect(self.path.as_uri() + "?mode=ro", uri=True) as db:
+            db.row_factory = sqlite3.Row
+            db.execute("BEGIN")
+            state = json.loads(db.execute("SELECT value FROM metadata").fetchone()[0])
+            items = []
+            for contract in dict.fromkeys(contracts):
+                item = {"contract": contract, "quote": None, "next": None}
+                try:
+                    result = self._query("snapshot", {
+                        "date": day, "source": source, "contract": contract, "time": stamp,
+                    }, db)
+                    item.update({k: result.get(k) for k in ("count", "start", "end", "quote", "next", "next_position")})
+                    if not result["count"]:
+                        item["state"] = "unavailable"
+                    elif target < int(result["start"]):
+                        item.update(state="before_start", next=result["start"])
+                    else:
+                        item["state"] = "ended" if target >= int(result["end"]) else "active"
+                    if item["quote"]:
+                        evidence = db.execute("SELECT meta FROM batches WHERE id=?", (item["quote"]["batch"],)).fetchone()
+                        item["quote"]["batch_metadata"] = json.loads(evidence[0]) if evidence else {}
+                except (OSError, ValueError, sqlite3.Error, struct.error) as error:
+                    item.update(state="error", error=str(error))
+                items.append(item)
+            return {**state, "date": day, "source": source, "time": stamp, "items": items}

@@ -89,6 +89,8 @@ def main(argv=None):
         "--include-module=scripts.time_probe",
         "--include-module=dashboard.server",
         "--include-module=dashboard.replay",
+        "--include-data-files=dashboard/index.html=dashboard/index.html",
+        "--include-data-files=dashboard/replay.js=dashboard/replay.js",
         "--include-module=ydcore.monitoring",
         "--include-module=ydcore.marketdata",
         "--report=build/nuitka/build-report.xml",
