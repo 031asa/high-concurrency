@@ -9,7 +9,7 @@ install_root = "/opt/ydtrader"
 state_root = "/var/lib/ydtrader"
 
 [protection]
-protected_modules = ["launcher", "marketdata", "monitoring", "trading", "yd_redis_server", "runtime_diagnostics", "archive_analysis"]
+protected_modules = ["launcher", "marketdata", "monitoring", "trading", "yd_redis_server", "runtime_diagnostics", "archive_analysis", "version_info"]
 nuitka_include_modules = [
   "pyyd",
   "ydcore.launcher",
@@ -46,6 +46,8 @@ aeron_mvp = [
   "zmq_market_probe",
 ]
 dashboard = ["server", "replay"]
+scripts = ["time_probe"]
+"timer_pdf.code" = ["analysis", "main", "publication", "render", "rules"]
 
 [container]
 base_image = "ubuntu:24.04"
@@ -57,6 +59,8 @@ uid = 10001
 environment_file = "environment.yml"
 prepare_commands = [["bash", "scripts/prepare_secure_release.sh"]]
 exclude_paths = [
+  "scripts/install_time_probe_service.py",
+  "timer_pdf/code/install_timer.py",
   "timer_pdf/pdf",
   "scripts/analyze_archive.py",
   "scripts/yd_redis_server.py",

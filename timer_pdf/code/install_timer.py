@@ -30,7 +30,7 @@ def main(argv=None):
     p.add_argument("--dry-run",action="store_true")
     a=p.parse_args(argv)
     datetime.fromisoformat(a.since)
-    command=[sys.executable,"-B",str(ROOT/"timer_pdf/code/main.py"),"--date","yesterday",
+    command=[sys.executable,"-B",str(ROOT/"main.py"),"daily-report","--date","yesterday",
        "--catch-up-from",a.since,"--input-root",str(a.input_root.resolve()),"--clock-root",str(a.clock_root.resolve()),
        "--output-root",str(a.output_root.resolve()),"--rules",str(a.rules.resolve())]
     if a.font:command+=["--font",str(Path(a.font).resolve())]

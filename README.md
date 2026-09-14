@@ -305,7 +305,29 @@ Redis 参数仍为 `REDIS_HOST`、`REDIS_PORT`、`REDIS_DB`，默认 `127.0.0.1:
 完整控制与计数路径；重复 local_id 会覆盖映射；重新启动后的回报关联只搜索内存映射；
 必填字段转换异常可能只写日志而没有错误回报；Redis 故障没有回报重放机制。
 这些是待单独确认的问题，不视为本次修复完成。离线测试通过不等于柜台联调通过。
-## 交易进程诊断
+## 保护镜像构建（含日报与回放）
+
+在安装了 secure-release 的 Conda 环境中，从干净且已推送的源码提交运行：
+
+```bash
+bash scripts/build_secure_image.sh \
+  --image ydtrader-high-concurrency:YOUR_VERSION \
+  --release-output /绝对路径/不存在的新发布目录 \
+  --host-private-key /现有密钥/issuer.private.pem \
+  --public-key /现有密钥/issuer.public.pem \
+  --key-password-env RELEASE_KEY_PASSWORD
+```
+
+预先以 read -s 设置并导出 RELEASE_KEY_PASSWORD（签名私钥密码，不是许可证密码）。
+脚本先核验远端提交，生成忽略于 Git 的 build-version.json/meta，随后启动完整构建；
+隔离构建目录没有 .git，日报据随包版本证明确认来源，不能伪造 published_commit。
+构建基础镜像 secure-release-builder-cn:24.7.1 需由打包工具项目的脚本准备。
+仅排除两个宿主 systemd 安装器，日报/时钟运行模块全部编译保护。
+宿主安装器及 Docker 日报脚本都经统一 main 入口，运行不依赖被移除的 .py 文件。
+PDF 规则 JSON 和中文字体仍随镜像提供。日报输出、回放缓存需挂载独立可写目录，
+原始归档目录只读挂载。启动帮助不代替实际 PDF 和历史回放验收。
+
+## 交易诊断日志
 
 `python main.py redis-trader` 默认每 60 秒向 stderr 输出一行
 `TRADER_DIAGNOSTIC` JSON，可用 `--heartbeat-seconds 30` 调整。

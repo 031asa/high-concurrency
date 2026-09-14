@@ -10,5 +10,10 @@ report_container=$1
 report_first_date=$2
 shift 2
 command -v docker >/dev/null || { printf 'Docker CLI not found\n' >&2; exit 127; }
-exec docker exec "$report_container" "${YDTRADER_REPORT_EXECUTABLE:-ydtrader}" daily-report \
+if [[ -n "${YDTRADER_REPORT_EXECUTABLE:-}" ]]; then
+    report_entry=("$YDTRADER_REPORT_EXECUTABLE")
+else
+    report_entry=("/opt/ydtrader-high-concurrency-env/bin/python" "/opt/ydtrader/main.py")
+fi
+exec docker exec "$report_container" "${report_entry[@]}" daily-report \
     --date yesterday --catch-up-from "$report_first_date" "$@"

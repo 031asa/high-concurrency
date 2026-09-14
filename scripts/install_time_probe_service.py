@@ -18,7 +18,7 @@ def main():
     root = Path(__file__).resolve().parents[1]
     config = args.config.resolve(strict=True)
     output = (args.output_root or root / "result/time-probes").resolve()
-    command = [sys.executable, "-B", str(root / "scripts/time_probe.py"),
+    command = [sys.executable, "-B", str(root / "main.py"), "time-probe",
                "--config", str(config), "--interval", str(args.interval),
                "--output-root", str(output)]
     unit = "[Unit]\nDescription=YDTrader read-only clock probe archive\nAfter=network-online.target\n\n"
@@ -34,4 +34,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
