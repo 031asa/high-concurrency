@@ -79,6 +79,7 @@ def main(argv=None):
         "--include-module=pyyd",
         "--include-module=ydcore.trading",
         "--include-module=ydcore.yd_redis_server",
+        "--include-module=ydcore.runtime_diagnostics",
         "--include-module=ydcore.archive_analysis",
         "--include-package=redis",
         "--include-package=timer_pdf",

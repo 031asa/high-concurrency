@@ -9,7 +9,7 @@ install_root = "/opt/ydtrader"
 state_root = "/var/lib/ydtrader"
 
 [protection]
-protected_modules = ["launcher", "marketdata", "monitoring", "trading", "yd_redis_server", "archive_analysis"]
+protected_modules = ["launcher", "marketdata", "monitoring", "trading", "yd_redis_server", "runtime_diagnostics", "archive_analysis"]
 nuitka_include_modules = [
   "pyyd",
   "ydcore.launcher",
@@ -17,6 +17,7 @@ nuitka_include_modules = [
   "ydcore.monitoring",
   "ydcore.trading",
   "ydcore.yd_redis_server",
+  "ydcore.runtime_diagnostics",
   "ydcore.archive_analysis",
   "ydcore.version_info",
   "scripts.time_probe",

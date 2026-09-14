@@ -305,7 +305,34 @@ Redis 参数仍为 `REDIS_HOST`、`REDIS_PORT`、`REDIS_DB`，默认 `127.0.0.1:
 完整控制与计数路径；重复 local_id 会覆盖映射；重新启动后的回报关联只搜索内存映射；
 必填字段转换异常可能只写日志而没有错误回报；Redis 故障没有回报重放机制。
 这些是待单独确认的问题，不视为本次修复完成。离线测试通过不等于柜台联调通过。
-## 易达行情启动排查
+## 交易进程诊断
+
+`python main.py redis-trader` 默认每 60 秒向 stderr 输出一行
+`TRADER_DIAGNOSTIC` JSON，可用 `--heartbeat-seconds 30` 调整。
+Docker 使用 `docker logs --timestamps <容器名>` 查看，无需可写应用目录。
+事件包括 start、ready、heartbeat、redis_loop_error、thread_exception、
+signal、stopping、exception 和 exit；时间为 UTC，包含 PID、运行阶段和运行时长。
+`main_loop_progress_age_seconds` 是主循环最近一次 Redis 读取返回后的间隔，
+变大可能是阻塞；心跳仅证明诊断线程存活，不证明柜台连接、账户同步或交易能力正常。
+
+新增诊断不输出账号、订单、配置或异常消息正文，仅记录异常类型与栈位置；
+原业务日志仍可能包含敏感信息，分享前请打码。捕获 SIGTERM/SIGINT 后尝试停止 SDK，
+退出码分别为 143/130。Python 启动、运行与清理失败保留非零退出码。
+启用 faulthandler 记录可捕获的底层致命错误；SIGKILL、os._exit、宿主掉电等
+无法保证留下最终退出日志，必须结合 Docker 状态与宿主日志判断。
+
+不会自动重连、重启或重放订单；未修改授权校验，也未改变行情无数据超时。
+本修复用于定位无日志退出，不代表已查明此前交易容器退出的根因。
+建议在部署层配置 Docker 日志轮转，并在删除容器前导出 docker logs。
+离线验证：`python -m pytest -q tests/test_trader_diagnostics.py tests/test_redis_compat.py`；
+测试使用假的交易服务，不连接柜台或 Redis。
+
+2026-09-14 验证：完整回归 219 通过、11 跳过；使用既有 v0.8.9 运行环境镜像，
+以只读挂载分别加载修复源码及 Cython 编译的两个模块，断网、UID 10001 的 Docker
+故障注入与交易兼容测试各 33 项通过。这不是完整生产镜像重新构建；
+部署时仍需从此提交重新打包，旧容器不会自动获得诊断功能。
+
+## 易达行情初始化阶段
 
 行情桥启动时依次记录 `CREATING_API`、`STARTING_API`、`LOGIN`、`CAUGHTUP`、
 `CHECKING_INSTRUMENT`、`SUBSCRIBED` 和 `FORWARDING`。以 `FORWARDING` 及实际行情

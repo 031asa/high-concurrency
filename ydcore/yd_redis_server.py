@@ -13,6 +13,7 @@ import threading
 import traceback
 from decimal import Decimal
 from pathlib import Path
+from ydcore.runtime_diagnostics import RuntimeDiagnostics
 
 # 导入现有 order.py 中的核心组件
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -543,22 +544,27 @@ class YdRedisTraderService:
         while self._running:
             try:
                 msg = self.redis_client.fetch_order(timeout=1)
+                diagnostics = getattr(self, "_diagnostics", None)
+                if diagnostics is not None:
+                    diagnostics.tick()
                 if msg:
                     self.process_order_message(msg)
             except KeyboardInterrupt:
                 break
             except Exception as e:
-                print("处理 Redis 消息异常:", e)
-                traceback.print_exc()
+                diagnostics = getattr(self, "_diagnostics", None)
+                if diagnostics is not None:
+                    diagnostics.error("redis_loop_error", e)
                 time.sleep(1)
-        self.stop()
 
     def _position_updater(self):
         while self._running:
             try:
                 self.update_positions_to_redis()
             except Exception as e:
-                print(f"定时更新持仓异常: {e}")
+                diagnostics = getattr(self, "_diagnostics", None)
+                if diagnostics is not None:
+                    diagnostics.error("position_update_error", e)
             time.sleep(5)
 
 # ==================== 入口 ====================
@@ -569,18 +575,37 @@ def main(argv=None):
     parser.add_argument("--account-config", default=str(PROJECT_ROOT / "config" / "account.json"))
     parser.add_argument("--api-config", default="config/ydClient.ini")
     parser.add_argument("--startup-timeout", type=int, default=60)
+    parser.add_argument("--heartbeat-seconds", type=int, default=60,
+                        help="process diagnostic interval (default: 60; not a broker-health check)")
     args = parser.parse_args(argv)
-
-    service = YdRedisTraderService(
-        account_config_path=args.account_config,
-        api_config_path=args.api_config,
-    )
+    if args.heartbeat_seconds < 1:
+        parser.error("--heartbeat-seconds must be positive")
     try:
-        service.start(args.startup_timeout)
-        service.run_forever()
-    except Exception as e:
-        print("服务启动失败:", e)
-        traceback.print_exc()
+        with RuntimeDiagnostics(args.heartbeat_seconds) as diagnostics:
+            service = None
+            try:
+                service = YdRedisTraderService(
+                    account_config_path=args.account_config,
+                    api_config_path=args.api_config,
+                )
+                service._diagnostics = diagnostics
+                service.start(args.startup_timeout)
+                diagnostics.phase = "running"
+                diagnostics.tick()
+                diagnostics.emit("ready")
+                service.run_forever()
+            finally:
+                diagnostics.phase = "stopping"
+                diagnostics.emit("stopping")
+                if service is not None:
+                    pending = sys.exc_info()[0] is not None
+                    try:
+                        service.stop()
+                    except Exception as error:
+                        diagnostics.error("cleanup_error", error)
+                        if not pending:
+                            raise
+    except Exception:
         return 1
     return 0
 

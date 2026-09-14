@@ -239,6 +239,7 @@ def test_main_preserves_config_arguments(gateway, monkeypatch):
         def __init__(self, **kwargs): calls.append(kwargs)
         def start(self, timeout): calls.append(timeout)
         def run_forever(self): calls.append('run')
+        def stop(self): pass
     monkeypatch.setattr(service, 'YdRedisTraderService', StubService)
     assert service.main(['--account-config', 'a', '--api-config', 'b', '--startup-timeout', '4']) == 0
     assert calls == [dict(account_config_path='a', api_config_path='b'), 4, 'run']
