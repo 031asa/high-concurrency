@@ -1,0 +1,12 @@
+{
+  "schema_version": 1,
+  "name": "ydapi-main",
+  "kind": "ydapi",
+  "enabled": true,
+  "account_config": "/secure/ydapi-main/account.json",
+  "api_config": "/secure/ydapi-main/ydClient.ini",
+  "instruments": ["IF2609", "IC2609", "IH2609", "IM2609"],
+  "repeat": 1,
+  "startup_timeout_seconds": 60,
+  "source_timeout_seconds": 86400
+}

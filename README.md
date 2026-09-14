@@ -356,6 +356,23 @@ signal、stopping、exception 和 exit；时间为 UTC，包含 PID、运行阶�
 
 ## 易达行情初始化阶段
 
+### 一个 YDApi 连接订阅多个合约
+
+配置可写 `"instruments": ["IF2609", "IC2609", "IH2609", "IM2609"]`，
+完整示例见 `config/market-sources/ydapi-multi.example.json`。
+旧 `"instrument": "IF2609"` 仍支持；两个字段不能同时填写，列表不能为空或重复。
+多源启动命令不变，仍通过 `--source-config` 传入一个 JSON 文件。
+底层桥也支持 `--instruments IF2609,IC2609`（兼容旧 `--instrument IF2609`）。
+
+只创建一个 API 实例、登录一次；初始化完成后先检查全部合约，再逐个订阅，
+请求之间留 50 ms 可中断间隔。不存在的合约或订阅失败明确报错，
+退出时清理已成功的订阅，不静默跳过。此间隔不是 SDK 吞吐能力的保证。
+回调按已启用合约集合过滤，所有合约共享同一来源的连续序号和 UDP 端口。
+`repeat` 及 `--count` 仍是整个来源的口径，不是每合约各计一份；
+`source_timeout_seconds` 也是整个来源无行情的超时，不是逐合约超时。
+SUBSCRIBED 表示订阅调用成功，不代表每个合约一定有实时行情。
+已有旧镜像需要重新构建才能识别新字段；本改动不修改柜台账号或主机网络。
+
 行情桥启动时依次记录 `CREATING_API`、`STARTING_API`、`LOGIN`、`CAUGHTUP`、
 `CHECKING_INSTRUMENT`、`SUBSCRIBED` 和 `FORWARDING`。以 `FORWARDING` 及实际行情
 计数确认收到行情；`LOGIN result=SUCCESS` 仅表示登录成功，不代表合约初始化或订阅完成。

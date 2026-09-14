@@ -154,7 +154,7 @@ class YdApiListener:
         self.caughtup_event = threading.Event()
         self.failure_event = threading.Event()
         self.failure_message = ""
-        self.subscribed_instrument = None
+        self.subscribed_instruments = frozenset()
         self.ignored_callbacks = 0
 
     def login(self, error, max_order_ref, is_monitor) -> None:
@@ -167,17 +167,15 @@ class YdApiListener:
         print("YDAPI_BRIDGE state=CAUGHTUP", flush=True)
 
     def enable_instrument(self, instrument: str) -> None:
-        self.subscribed_instrument = instrument
+        self.subscribed_instruments = self.subscribed_instruments | {instrument}
 
-    def disable_instrument(self) -> None:
-        self.subscribed_instrument = None
+    def disable_instrument(self, instrument=None) -> None:
+        self.subscribed_instruments = (frozenset() if instrument is None else
+                                       self.subscribed_instruments - {instrument})
 
     def marketdata_is_enabled(self, market_data) -> bool:
         instrument = str(getattr(market_data, "instrument", "") or "")
-        return (
-            self.subscribed_instrument is not None
-            and instrument == self.subscribed_instrument
-        )
+        return instrument in self.subscribed_instruments
 
     def marketdata(self, market_data) -> None:
         received_ns = time.time_ns()
@@ -261,7 +259,9 @@ def wait_for_initialization(listener: YdApiListener, stop: threading.Event, time
 
 def parse_args(argv=None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--instrument", required=True)
+    selection = parser.add_mutually_exclusive_group(required=True)
+    selection.add_argument("--instrument")
+    selection.add_argument("--instruments", help="comma-separated instrument list")
     parser.add_argument("--account-config", required=True)
     parser.add_argument("--api-config", required=True)
     parser.add_argument("--udp-host", default="127.0.0.1")
@@ -270,6 +270,13 @@ def parse_args(argv=None) -> argparse.Namespace:
     parser.add_argument("--startup-timeout-seconds", type=float, default=60.0)
     parser.add_argument("--idle-timeout-seconds", type=float, default=60.0)
     args = parser.parse_args(argv)
+    selected = args.instruments.split(",") if args.instruments is not None else [args.instrument]
+    if any(not value or value != value.strip() or any(c.isspace() for c in value) or "," in value
+           for value in selected):
+        parser.error("instruments must contain non-empty instrument identifiers")
+    if len(set(selected)) != len(selected):
+        parser.error("instruments contains duplicates")
+    args.instruments = selected
     if not 1 <= args.udp_port <= 65535:
         parser.error("--udp-port must be between 1 and 65535")
     if not 1 <= args.repeat <= 1_000_000:
@@ -287,7 +294,7 @@ def main(argv=None) -> int:
     print("YDAPI_BRIDGE state=CREATING_API", flush=True)
     api = create_api(listener, account, password, args.api_config)
     stop = threading.Event()
-    subscribed = False
+    subscribed = []
 
     def stop_handler(signum, frame) -> None:
         stop.set()
@@ -301,22 +308,30 @@ def main(argv=None) -> int:
             raise RuntimeError("YDApi.start() returned False")
         if not wait_for_initialization(listener, stop, args.startup_timeout_seconds):
             return 130
-        print(f"YDAPI_BRIDGE state=CHECKING_INSTRUMENT instrument={args.instrument}", flush=True)
-        if api.get_instrument(args.instrument) is None:
-            raise ValueError(f"instrument not found in YDApi: {args.instrument}")
+        for instrument in args.instruments:
+            if stop.is_set():
+                return 130
+            print(f"YDAPI_BRIDGE state=CHECKING_INSTRUMENT instrument={instrument}", flush=True)
+            if api.get_instrument(instrument) is None:
+                raise ValueError(f"instrument not found in YDApi: {instrument}")
         # Enable immediately before subscribe so a synchronous subscription callback
         # is accepted, while startup/catch-up callbacks remain excluded.
-        listener.enable_instrument(args.instrument)
-        if api.subscribe(args.instrument) is False:
-            listener.disable_instrument()
-            raise RuntimeError(f"YDApi.subscribe() returned False: {args.instrument}")
-        subscribed = True
-        print(
-            "YDAPI_BRIDGE state=SUBSCRIBED "
-            f"account={mask_account(account)} instrument={args.instrument} "
-            f"idle_timeout_seconds={args.idle_timeout_seconds:g}",
-            flush=True,
-        )
+        for instrument in args.instruments:
+            if stop.is_set():
+                return 130
+            listener.enable_instrument(instrument)
+            if api.subscribe(instrument) is False:
+                listener.disable_instrument(instrument)
+                raise RuntimeError(f"YDApi.subscribe() returned False: {instrument}")
+            subscribed.append(instrument)
+            print(
+                "YDAPI_BRIDGE state=SUBSCRIBED "
+                f"account={mask_account(account)} instrument={instrument} "
+                f"idle_timeout_seconds={args.idle_timeout_seconds:g}",
+                flush=True,
+            )
+            if len(subscribed) < len(args.instruments) and stop.wait(0.05):
+                return 130
         subscribed_at = time.monotonic()
         while not stop.wait(0.1):
             if listener.failure_event.is_set():
@@ -324,21 +339,23 @@ def main(argv=None) -> int:
             reference = publisher.last_tick_monotonic if publisher.sequence else subscribed_at
             if time.monotonic() - reference > args.idle_timeout_seconds:
                 raise TimeoutError(
-                    f"YDApi instrument {args.instrument} idle for "
+                    f"YDApi source ({len(args.instruments)} instruments) idle for "
                     f"{args.idle_timeout_seconds:g} seconds after "
                     f"source_ticks={publisher.sequence}"
                 )
     finally:
-        if subscribed:
+        listener.disable_instrument()
+        for instrument in reversed(subscribed):
             try:
-                api.unsubscribe(args.instrument)
+                api.unsubscribe(instrument)
             except Exception as exc:
                 print(f"YDAPI_BRIDGE state=UNSUBSCRIBE_FAILED type={type(exc).__name__}", flush=True)
-        listener.disable_instrument()
         stop_api = getattr(api, "stop", None)
-        if callable(stop_api):
-            stop_api()
-        publisher.close()
+        try:
+            if callable(stop_api):
+                stop_api()
+        finally:
+            publisher.close()
     if publisher.sequence == 0:
         print("YDAPI_BRIDGE result=INCOMPLETE source_ticks=0", flush=True)
         return 1

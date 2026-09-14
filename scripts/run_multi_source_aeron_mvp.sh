@@ -488,7 +488,7 @@ for index in "${!source_names[@]}"; do
             --idle-timeout-seconds "${source_idle_timeouts[$index]}" >"$run_dir/$name-bridge.log" 2>&1 &
     else
         "${source_pythons[$index]}" "$PROJECT_ROOT/main.py" ydapi-bridge \
-            --instrument "${source_instruments[$index]}" \
+            --instruments "${source_instrument_lists[$index]:-${source_instruments[$index]}}" \
             --account-config "${source_account_configs[$index]}" --api-config "${source_api_configs[$index]}" \
             --udp-host 127.0.0.1 --udp-port "$port" --repeat "${source_repeats[$index]}" \
             --startup-timeout-seconds "${source_startup_timeouts[$index]}" \

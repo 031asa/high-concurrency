@@ -35,6 +35,7 @@ KIND_KEYS = {
         "account_config",
         "api_config",
         "instrument",
+        "instruments",
         "startup_timeout_seconds",
     },
 }
@@ -193,6 +194,11 @@ def load_source_config(path: Path, project_root: Path) -> dict[str, str]:
             instruments=_instruments(document.get("instruments"), source),
         )
     else:
+        if "instrument" in document and "instruments" in document:
+            raise SourceConfigError(f"{source}: use instrument or instruments, not both")
+        selected = (_instruments(document["instruments"], source)
+                    if "instruments" in document else
+                    _instrument(document.get("instrument"), "instrument", source))
         normalized.update(
             python=_optional_project_path(
                 document.get("python"), "python", source, project_root
@@ -203,7 +209,8 @@ def load_source_config(path: Path, project_root: Path) -> dict[str, str]:
             api_config=_project_path(
                 document.get("api_config"), "api_config", source, project_root
             ),
-            instrument=_instrument(document.get("instrument"), "instrument", source),
+            instrument=selected if "instruments" not in document else "",
+            instruments=selected,
             startup_timeout_seconds=str(
                 _integer(
                     document.get("startup_timeout_seconds", 60),
