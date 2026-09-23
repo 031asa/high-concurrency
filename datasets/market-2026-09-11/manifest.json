@@ -1,0 +1,238 @@
+{
+  "schema": 1,
+  "date": "2026-09-11",
+  "timezone": "Asia/Shanghai",
+  "filter": "original localReceiveNs Beijing natural date",
+  "code_commit": "174e86c6dc1662fe221b25b318cb09c68eed4a85",
+  "index_snapshot_utc": "2026-09-14T07:13:28.553207+00:00",
+  "index_generation": "75a0adc01e175470f6d8a8d9f63ea5e639cb505c3b17506b9a7d70351b2a58c1",
+  "raw_frames": 447399,
+  "sources": {
+    "ctp-live-5level": 408914,
+    "ctp-tts-7x24": 38485
+  },
+  "batches": 56,
+  "contracts": [
+    {
+      "source": "ctp-live-5level",
+      "contract": "IC2609",
+      "count": 23354
+    },
+    {
+      "source": "ctp-live-5level",
+      "contract": "IF2609",
+      "count": 22605
+    },
+    {
+      "source": "ctp-live-5level",
+      "contract": "IH2609",
+      "count": 20710
+    },
+    {
+      "source": "ctp-live-5level",
+      "contract": "IM2609",
+      "count": 23420
+    },
+    {
+      "source": "ctp-live-5level",
+      "contract": "ag2612",
+      "count": 59677
+    },
+    {
+      "source": "ctp-live-5level",
+      "contract": "au2612",
+      "count": 58431
+    },
+    {
+      "source": "ctp-live-5level",
+      "contract": "cu2610",
+      "count": 40301
+    },
+    {
+      "source": "ctp-live-5level",
+      "contract": "i2701",
+      "count": 30063
+    },
+    {
+      "source": "ctp-live-5level",
+      "contract": "m2701",
+      "count": 35158
+    },
+    {
+      "source": "ctp-live-5level",
+      "contract": "rb2701",
+      "count": 35397
+    },
+    {
+      "source": "ctp-live-5level",
+      "contract": "sc2610",
+      "count": 59798
+    },
+    {
+      "source": "ctp-tts-7x24",
+      "contract": "IC2609",
+      "count": 626
+    },
+    {
+      "source": "ctp-tts-7x24",
+      "contract": "IF2609",
+      "count": 627
+    },
+    {
+      "source": "ctp-tts-7x24",
+      "contract": "IH2609",
+      "count": 534
+    },
+    {
+      "source": "ctp-tts-7x24",
+      "contract": "IM2609",
+      "count": 541
+    },
+    {
+      "source": "ctp-tts-7x24",
+      "contract": "ag2612",
+      "count": 18378
+    },
+    {
+      "source": "ctp-tts-7x24",
+      "contract": "au2612",
+      "count": 17779
+    }
+  ],
+  "coverage": {
+    "ctp-live-5level": {
+      "first": "2026-09-11T00:00:00.026628+08:00",
+      "last": "2026-09-11T23:59:59.557432+08:00"
+    },
+    "ctp-tts-7x24": {
+      "first": "2026-09-11T00:01:35.757358+08:00",
+      "last": "2026-09-11T23:59:39.662176+08:00"
+    }
+  },
+  "relevant_index_warnings": [],
+  "deduplication": "source/session/sequence, inherited from indexed snapshot",
+  "format": "Aligned Aeron/SBE frames compacted for project read-only parsers; not a restorable Aeron Archive catalog",
+  "excluded": [
+    "credentials",
+    "account configurations",
+    "operational logs",
+    "clock probes",
+    "Aeron catalog and media-driver metadata"
+  ],
+  "files": {
+    "expected-analysis.json": "74fb16d75d719d163729827935b335eaf19a9dfd78bb59d50cf24881702f5d4a",
+    "provenance.csv.gz": "6ee6f1fa4ed16c48e5f3120d2fb3356c74b99e1e3b0ceead2eb931e0eb95ffe3",
+    "aeron-mvp/20260911T021045Z-3589080/run.meta": "7f2aea7ab38eceafe2f21b9329c9e5cda344a14744434c23490cfaa588a2e0d4",
+    "aeron-mvp/20260911T021045Z-3589080/archive/0-0.rec": "aeabf334452b0079d6340fea82c9fe097ab07cef3197348c6d8566bf62e24a3d",
+    "aeron-mvp/20260911T031118Z-3673730/run.meta": "21e62d2b2181c30d3814537f519d1c34a1c431ac942f905a09a498265b5d2966",
+    "aeron-mvp/20260911T031118Z-3673730/archive/0-0.rec": "9379d7d723ad105e540f67e3412133df6b6df1ac9a42ba12aa0b6c4a04923aed",
+    "aeron-mvp/20260911T011603Z-3519427/run.meta": "d204617c54eed1081e7bd0ee89df1dbecd31bdeb569b65e6c66190638f870796",
+    "aeron-mvp/20260911T011603Z-3519427/archive/0-0.rec": "589a47cc0f084972dae515e685a2b7ba8754704194ca8f90ff4200a1ca4c0f20",
+    "aeron-mvp/20260911T025738Z-3657155/run.meta": "5c529c2d3d9f0d3283b1caee8617360a167044c0509c50001101f2bd827ef8f6",
+    "aeron-mvp/20260911T025738Z-3657155/archive/0-0.rec": "7854f216e5ef79b9ce13d233c1fce331889b3afc32deefa7cdeadd5f210844c8",
+    "aeron-mvp/20260911T020828Z-3586264/run.meta": "5a1aa9f92f3789186fcc6d62ab58d42ae5370e1631bd228d6c5feac1bdec5dd9",
+    "aeron-mvp/20260911T020828Z-3586264/archive/0-0.rec": "d7b575f8d77c8500136ca9ab73512e2de4ad5d4c23fe6bb6a7e86bc527e24bdd",
+    "aeron-mvp/20260911T031713Z-3681281/run.meta": "8e0c22bebda6a0bd7ee251264aa2aa4920d531a07e98faa9625a8bd38d69a982",
+    "aeron-mvp/20260911T031713Z-3681281/archive/0-0.rec": "f8e14a0c2bf70dab2da968abb1b5f5ae02ea21d856fd65c2aac7983da072964c",
+    "aeron-mvp/20260911T053844Z-3846675/run.meta": "5c36036a50ac03bfbab44525afbc01eb965a3d37fb0f30e2d7b12d358ddf5efa",
+    "aeron-mvp/20260911T053844Z-3846675/archive/0-0.rec": "843c9fc250f7eb0d70e741ccf670223de07c0ff8081c809de926461d9d07e506",
+    "aeron-mvp/20260911T053659Z-3844528/run.meta": "2bc84c76acf67c24fd8f2b52ffb8ac3d66090429c87b32cc2101d8ee4dcf814b",
+    "aeron-mvp/20260911T053659Z-3844528/archive/0-0.rec": "0b63a8ead880d3cad86a593356b759279ce6e149dd1d2605591f32f2e0faa340",
+    "aeron-mvp/20260911T020206Z-3578427/run.meta": "acceb21715759eceae4a259a147577e33e01433542c7d76e897b2962db0f21bd",
+    "aeron-mvp/20260911T020206Z-3578427/archive/0-0.rec": "39ad6e606a25ddb54aec37795409e0aa5b127857e4e76ac2f84ca661ee742ac2",
+    "aeron-mvp/20260911T022627Z-3609053/run.meta": "531e0eda9bad8b00afc18c88eb6b768db11c2673c6637e9ec244cc2ec50dd4e5",
+    "aeron-mvp/20260911T022627Z-3609053/archive/0-0.rec": "20165c0a0106ab8736f39eaae9dee9dedc8eeb1654b968e1680b2f2c07b21024",
+    "aeron-mvp/20260911T021534Z-3595010/run.meta": "1f88df94331d6dd08e2e52dbcf108d5bef624685a7e6898157bb2c09d7e0747e",
+    "aeron-mvp/20260911T021534Z-3595010/archive/0-0.rec": "1d6fc7c65ed24a5e5465a24306bc71b93a133e71f514c4c863782daddd6dfab9",
+    "aeron-mvp/20260911T020304Z-3579654/run.meta": "44ba5c59ea2a8f7fb30057569c494971333ef96c5798e8a1cc0cc086be48abb2",
+    "aeron-mvp/20260911T020304Z-3579654/archive/0-0.rec": "449de482c8197f91c5bf03ec1edf566be0d9f04d19560fe43b620f07495f5cc2",
+    "aeron-mvp/20260911T020951Z-3587946/run.meta": "cae6537ae8c5d036b3cb29d46e995be788c4c53aafbeca2156a4c1a14f928ba5",
+    "aeron-mvp/20260911T020951Z-3587946/archive/0-0.rec": "1d8674fa93bcf7975863e242c7c2d3526df386d7a65e227ae3da91b8bf357e04",
+    "aeron-mvp/20260911T021358Z-3592927/run.meta": "c4df460e0b407f156cb11291d06166dda6ced7e391923c8a70a1be06ded9e4a8",
+    "aeron-mvp/20260911T021358Z-3592927/archive/0-0.rec": "80269eb4740900089a6a85171ca03e8a2da41b2088333056c622e7bf16952812",
+    "aeron-mvp/20260911T031352Z-3676967/run.meta": "eeb304a2d6b39ff978252103ec46e9558d1143f3b4a528ba73b5e7df7e7cc50d",
+    "aeron-mvp/20260911T031352Z-3676967/archive/0-0.rec": "740eae6e038829d554a575acf8738a415e30c3f1633127a9eee5d13edf2bc58c",
+    "aeron-mvp/20260911T053941Z-3847862/run.meta": "2e500f4e7b8897aa8087b68b7b4718ef763908834eb9748ea9572f39051e6e1b",
+    "aeron-mvp/20260911T053941Z-3847862/archive/0-0.rec": "1aae0ca4752a385a2629002dfabce4f483aa01c477374b3256ed931081cafba3",
+    "aeron-mvp/20260911T051524Z-3818901/run.meta": "cc1f7e1568de130bbb4d40672d2507a8343a6d7dc8b46549e3f682f97daf2abd",
+    "aeron-mvp/20260911T051524Z-3818901/archive/0-0.rec": "aef5eb2b8c627c42e207a2635845cce42db06281ea3668578360627db1fdca52",
+    "aeron-mvp/20260910T163003Z-2909737/run.meta": "8292377416c8941b82bfd45a42c6f5505ae2226b57180836ceddebf9417e6ff5",
+    "aeron-mvp/20260910T163003Z-2909737/archive/0-0.rec": "9d75123ee4df1b3eba7312e7059cb930aef31f885ece8daee72ad8e56ab279b1",
+    "aeron-mvp/20260911T013750Z-3547286/run.meta": "65857ba9a9851f5cef7ef88af653838486762abb660ca8737d0a2ed7e1413a19",
+    "aeron-mvp/20260911T013750Z-3547286/archive/0-0.rec": "88a54fbd272c0729047d43c952a0aabc63b6d82c916b0e0ae0fb7dca1ef46df0",
+    "aeron-mvp/20260911T054556Z-3855357/run.meta": "84e8890273efe54be82157ec51fe00863b9f2fe8fcca72da8a377e1401091f44",
+    "aeron-mvp/20260911T054556Z-3855357/archive/0-0.rec": "063f5f23b2c7230712441cae5135eef019f67e64ab8b5605c87dcd2daeb016b6",
+    "aeron-mvp/20260910T152110Z-2829850/run.meta": "5f68305354e969608bb3cbab817297994f3416b463953e9f011c81c1b4b70993",
+    "aeron-mvp/20260910T152110Z-2829850/archive/0-0.rec": "a212603d1e04b4c35e2cf207514025fe35e414ed6f6e1ec981aea0000fc04254",
+    "aeron-mvp/20260911T012654Z-3532966/run.meta": "ff5cafeca330d26519efd7c7ac3b4cc7500cc45b90a0bdb27b18eb3411f4b0cb",
+    "aeron-mvp/20260911T012654Z-3532966/archive/0-0.rec": "da297488fe682dba3a73997e2f40bd91bdee1bc3ab911fcc03ff387c69e21a62",
+    "aeron-mvp/20260911T051414Z-3817460/run.meta": "87d141f1e38a36e45551a1ec1a7a51f9c8103fb9021d4016413b0b2cb12c8c07",
+    "aeron-mvp/20260911T051414Z-3817460/archive/0-0.rec": "f42eced329b4420e565a349418f27fab658c045d80102b343c0ae1e0bfe1af22",
+    "aeron-mvp/20260911T055247Z-3865799/run.meta": "90c5709d3269f2fe9848af494fc5ecd411943a7e043845b9b64e3887b2c66525",
+    "aeron-mvp/20260911T055247Z-3865799/archive/0-0.rec": "921359114123ba04ba24dfab093319915421e3542283ab154b5d6bd1578dc493",
+    "aeron-mvp/20260911T015705Z-3572373/run.meta": "a04210497e46f69b1e74a7eaff4faf0ad31ba5625ae9c7ed8e6508e4b79fe337",
+    "aeron-mvp/20260911T015705Z-3572373/archive/0-0.rec": "946968b99d7cc7d9806ca9ab93b7550c6f3b7a92dfea7f681a71c521f782a9b4",
+    "aeron-mvp/20260911T015117Z-3565095/run.meta": "884250098773ca42acdc5f4990bbc703b267baf226319f5d66bf0ff832ad3c0b",
+    "aeron-mvp/20260911T015117Z-3565095/archive/0-0.rec": "8566d761a8cbd697caa79fdb3b1e18db82fd169c6eb1eccd235691983da17f6d",
+    "aeron-mvp/20260911T030349Z-3664918/run.meta": "51416d0d4804a15da3dd2fceff4a823a8217938c6258b3fdab5d1a44c4787c49",
+    "aeron-mvp/20260911T030349Z-3664918/archive/0-0.rec": "4f80e70ca8eb975af5e9da53bad822195475abfba87b818ee668d3165d9f9b10",
+    "aeron-mvp/20260911T023926Z-3626172/run.meta": "612b39b8598bb64a7fd6be619e90f1f53142c0461a060cba2f677148ffc26082",
+    "aeron-mvp/20260911T023926Z-3626172/archive/0-0.rec": "2a02cc8e4187466bc38ddf3fa9171dbd7beec0e3c44b569b530ae27c8bd15c6e",
+    "aeron-mvp/20260911T025615Z-3655083/run.meta": "5e0e9f23423d9d1e37edbea82020707501da18c26972c4152811236a41a741c5",
+    "aeron-mvp/20260911T025615Z-3655083/archive/0-0.rec": "0ab771eee5ae8b532880269f528d0091c4388e24515a9c7cf7b8baaab4c4c085",
+    "aeron-mvp/20260911T010839Z-3510752/run.meta": "96a1db842a7fe5f1b28b841cc092b69089bcc7ec9ce0eceb692517e7239fe0ad",
+    "aeron-mvp/20260911T010839Z-3510752/archive/0-0.rec": "00c33d0dd58a1367ad0b7f4fe59350f25cbb5f94db6495b6d95f376f99a5bd98",
+    "aeron-mvp/20260911T025024Z-3646076/run.meta": "4b13f2cb42e1468434d40ff2017b55c70ebf3c87c669e8ac7e0945a26ee361fc",
+    "aeron-mvp/20260911T025024Z-3646076/archive/0-0.rec": "62c9b6822ec4c692bf4fda669e325aa5b15c91a32a6d364f97b6f209271ccb07",
+    "aeron-mvp/20260911T050249Z-3803900/run.meta": "d2be0d85f298d2c8d23e73c363e90d6187700e2a664aa3e2e43c15096d64e0fa",
+    "aeron-mvp/20260911T050249Z-3803900/archive/0-0.rec": "b3768bc6293a770a7c55897259c206d10e7a903d7b42b2c25433196b1ee177d6",
+    "aeron-mvp/20260911T013823Z-3548095/run.meta": "8f2170303fd569b747e650cc61d545780629f37665f43e344af25b9cdc63adce",
+    "aeron-mvp/20260911T013823Z-3548095/archive/0-0.rec": "40881825b6e4ff539c31ba18a695dee92decc5444489114c22787339ee0bdc9b",
+    "aeron-mvp/20260911T055318Z-3866882/run.meta": "f5e513082b5c059301c2ab0894882d67e431d61ac5b1897391664d90870c9987",
+    "aeron-mvp/20260911T055318Z-3866882/archive/0-0.rec": "6d66361a53ff88402c45bb2b90a90e0da5cfa0fdfe67795a8acb3ff376ae21ee",
+    "aeron-mvp/20260910T162020Z-2898412/run.meta": "c25f0aae00f712c6f689c82f9a33d5311cbca6874c745d0fbec8809aafd42a9c",
+    "aeron-mvp/20260910T162020Z-2898412/archive/0-0.rec": "7a79757867fd5aef02fadcc65d9963f94b3bf7016b70f16c6890c85abb6bee4e",
+    "aeron-mvp/20260911T051133Z-3814259/run.meta": "b566eb9f27eebc7cbdaa93d444fc826b9347b8755c098e8f552ceb207e145246",
+    "aeron-mvp/20260911T051133Z-3814259/archive/0-0.rec": "cff4276816ebe1fcd85765d74a37e288f6f78ae6b2dc03a208c7801d3373be13",
+    "aeron-mvp/20260911T013850Z-3548769/run.meta": "88371fb806572f593449ad7b5a7469d1781e5c166dfd5dbd2dc7d3eacfcdaca1",
+    "aeron-mvp/20260911T013850Z-3548769/archive/0-0.rec": "1e5ff7d0a7ba98e780c144c3b87c26dd622462f255b01ee0588fb41cf00e41fe",
+    "aeron-mvp/20260911T053248Z-3839423/run.meta": "5a9b1a0b077db7864ed01f36b6173967e74ba95977d625b431bead9914430864",
+    "aeron-mvp/20260911T053248Z-3839423/archive/0-0.rec": "bf69693c75ab77a771e1933bfa43520ec7b53af324db72264d8a81e8db7ad077",
+    "aeron-mvp/20260911T010246Z-3503857/run.meta": "ea3b734e4e202cc70f4ec03bbf1647d7b7da354697cbdc3a81fb5b3ffcab9db8",
+    "aeron-mvp/20260911T010246Z-3503857/archive/0-0.rec": "d4264c038cb1c57326f3ce5678de197d3ee060d533c4422fad5f613efa898f3d",
+    "aeron-mvp/20260911T030224Z-3663104/run.meta": "7124ba1f42b5e57e83e2be3a601c3531ac3732442e19f8381ce44c74a5133be9",
+    "aeron-mvp/20260911T030224Z-3663104/archive/0-0.rec": "f147c41e80f019476f891df0af9273aac0459945602f46f9c482f5455570cdbf",
+    "aeron-mvp/20260911T050858Z-3811192/run.meta": "634d74bb3b573568e3e12bfdb177bf48e048ad8ba3182491cba3213b632427c8",
+    "aeron-mvp/20260911T050858Z-3811192/archive/0-0.rec": "5d6d0f2420646406746f20f0c88c424e93d3a8ddb9a4f138c431b3d01c2ccef4",
+    "aeron-mvp/20260911T025542Z-3654357/run.meta": "911fdf4318bbd34d5e1cd562f25a133a07e51064ece55a97114c9538b1e30ea1",
+    "aeron-mvp/20260911T025542Z-3654357/archive/0-0.rec": "82f68354162570d9b63dc5ed99d1c2a6bad7b3ff5db4610c5a8be459be4ea5b1",
+    "aeron-mvp/20260911T053524Z-3842640/run.meta": "addc8fd9268f789679b1e3c31166fa5dec767b3427a44f1fc268fe23b632a00e",
+    "aeron-mvp/20260911T053524Z-3842640/archive/0-0.rec": "14c72e908f8a289bd1b35b7facb34e100adf4e9e4eaace572d790fcec82fdf0a",
+    "aeron-mvp/20260911T015200Z-3566086/run.meta": "9ddec86acec926c1652dc1f3e4a3af4f644f285eaf9a880691b60cd84961b8ec",
+    "aeron-mvp/20260911T015200Z-3566086/archive/0-0.rec": "77191598f17416b51d96d2a72359e806282ccb852913ae61a09de12743909805",
+    "aeron-mvp/20260911T050404Z-3805425/run.meta": "6a53611039d58e7396b49453c61c39ccd59ee66a8403112fa22af31568d8d86f",
+    "aeron-mvp/20260911T050404Z-3805425/archive/0-0.rec": "0d16f7f5cf3176edb1275e46c6aef68457aa48fb61f8f272eb6287a8bd10708e",
+    "aeron-mvp/20260911T031425Z-3677742/run.meta": "776da9d6446af4a26f74972f361caa9c4a42c64574a6989e4cf07f82c48427ca",
+    "aeron-mvp/20260911T031425Z-3677742/archive/0-0.rec": "05d1df10de16dbd52a9ccf135805036499ff8eebeb1edd8a8042cd84c08e4630",
+    "aeron-mvp/20260911T053321Z-3840163/run.meta": "6e8df0ce12caa8c4a0c52be1c8a459d06610fef4e88b299122f25d96f132dd03",
+    "aeron-mvp/20260911T053321Z-3840163/archive/0-0.rec": "521f52f5e6c6868920c726e5b66ffea41dac4e77b7bb5888c40141161a9f636d",
+    "aeron-mvp/20260911T051859Z-3823211/run.meta": "69a8e77010bd3030046b86d6e227f68802d179e9464b659b04a2dc4652e259a1",
+    "aeron-mvp/20260911T051859Z-3823211/archive/0-0.rec": "4fec946ce1e1e48af6ab7a04675838b0f9e716a64dfcd6e99bbeee20b2c82258",
+    "aeron-mvp/20260911T054950Z-3861450/run.meta": "7c1c286f0576db213b29e932968b16154d6bdb1d7bc73dca6ba455f533cbabce",
+    "aeron-mvp/20260911T054950Z-3861450/archive/0-0.rec": "7e55d387a7a3bbdfed7d11854fef122c456f10b2685411515af1726960b1416c",
+    "aeron-mvp/20260911T054400Z-3852991/run.meta": "b5fed169504ec53312d1c1ed2e4d81f194f920f654215927d0ac38eb271b2e72",
+    "aeron-mvp/20260911T054400Z-3852991/archive/0-0.rec": "9de7e449cde21b6a3b438fcba6afeaba7de9770ee15b20df594cf876f4c0efac",
+    "aeron-mvp/20260910T174052Z-2991967/run.meta": "ba7253717b8da710e99909da442cd9c04417c33c0298a07067d2e3b1954e9837",
+    "aeron-mvp/20260910T174052Z-2991967/archive/0-0.rec": "ea088a20bf9dad4e721a44be9dd82c265eaff8bcda12800be70c8734bcc77c51",
+    "aeron-mvp/20260911T054853Z-3860238/run.meta": "8f2d3a1f3d1e9a6eeab6ebe90e769515d26b82b3afc6e5a2acd76a37f2d5f991",
+    "aeron-mvp/20260911T054853Z-3860238/archive/0-0.rec": "8a0d3292b3dbc214f335fcd7c5236d0e229f59756bdac4ae8047e8bb91d8fd72",
+    "aeron-mvp/20260911T030947Z-3671886/run.meta": "c095ca98bbbef07d4a0159d338dca4ec26ac2568e10db27d1cb221c0dff2db65",
+    "aeron-mvp/20260911T030947Z-3671886/archive/0-0.rec": "c28d789e8eab9d29ba90c9ba01d607d7539b96cd4f1f9add48145ec3e4bccaf1",
+    "aeron-mvp/20260911T025822Z-3658110/run.meta": "c34d18b50385685b0c6dc2fabdd86fe7029de6cd95d6a408e8660fbfd3623abb",
+    "aeron-mvp/20260911T025822Z-3658110/archive/0-0.rec": "4d39a62c8abe7056e98d945bd1df8364ab5a3c30c506fcdb3d951cce6053b5f3",
+    "aeron-mvp/20260911T031623Z-3680215/run.meta": "eca5b44e70942865f16dde2d3d7e699eeef59d2d18daa5bab24079da69cda7d4",
+    "aeron-mvp/20260911T031623Z-3680215/archive/0-0.rec": "4af56a4100b61e244db979ec765beacb203d45f93a76a9f4a92859bc4d817463",
+    "aeron-mvp/20260911T024100Z-3628873/run.meta": "c59647e56149be2a8642719eaa4efa632b32203f174f609df78acc0a31bf15bb",
+    "aeron-mvp/20260911T024100Z-3628873/archive/0-0.rec": "f988edc97a4888ec78eee75a5129ee96c80b2b2461cd3dd8f47e8026dd8cd4a5"
+  }
+}

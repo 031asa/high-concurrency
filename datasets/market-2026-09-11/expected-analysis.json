@@ -1,0 +1,45 @@
+{
+  "date": "2026-09-11",
+  "parse_status": "COMPLETE",
+  "counts": {
+    "ctp-live-5level": 408914,
+    "ctp-tts-7x24": 38485
+  },
+  "sources": {
+    "ctp-live-5level": {
+      "count": 408914,
+      "clean": {
+        "n": 408773,
+        "mean": 100.22855136177536,
+        "std": 580.390389097949,
+        "max": 108019.869093,
+        "p50": 77.331621,
+        "p90": 188.033988,
+        "p95": 279.848527,
+        "p99": 417.165306
+      },
+      "categories": {
+        "live": 408773,
+        "session_snapshot": 129,
+        "invalid_time": 12
+      }
+    },
+    "ctp-tts-7x24": {
+      "count": 38485,
+      "clean": {
+        "n": 0,
+        "mean": null,
+        "std": null,
+        "max": null,
+        "p50": null,
+        "p90": null,
+        "p95": null,
+        "p99": null
+      },
+      "categories": {
+        "historical_replay": 38485
+      }
+    }
+  },
+  "note": "Only exported samples; clock data, operational logs and transport evidence are intentionally absent. No claim of full-day service coverage."
+}
